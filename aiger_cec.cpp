@@ -49,64 +49,6 @@ int compute_depth(unsigned lit, aiger *model, std::map<int, int> &depth_map) {
     return depth;
 }
 
-void create_aiger_after_cec(aiger * model, CondEC &condeq_check){  // for normal cec create new aig
-    aiger * new_model;
-    new_model = aiger_init();
-    std::map<unsigned, int> node_create_map;
-
-    for(int i = 0; i < model -> num_inputs; i ++){
-        auto input_lit = model->inputs[i].lit;
-        auto input_node = condeq_check.lit_node_map[input_lit];
-        aiger_add_input(new_model, aiger_var2lit(input_node), 0);
-    }
-    for(int i = 0; i < model -> num_ands; i ++){
-        auto rhs0_lit = model -> ands[i].rhs0;
-        auto rhs1_lit = model -> ands[i].rhs1;
-        auto lhs_lit  = model -> ands[i].lhs;
-
-        auto rhs0_node = condeq_check.lit_node_map[aiger_strip(rhs0_lit)];
-        auto rhs1_node = condeq_check.lit_node_map[aiger_strip(rhs1_lit)];
-        auto lhs_node  = condeq_check.lit_node_map[lhs_lit];
-        
-        if(node_create_map.find(lhs_node) != node_create_map.end()){
-            assert(node_create_map.find(lhs_node)->second == 1);
-            continue;
-        }
-        
-        auto rhs0_new_lit = aiger_sign(rhs0_lit) ? aiger_var2lit(rhs0_node)+1 : aiger_var2lit(rhs0_node);
-        auto rhs1_new_lit = aiger_sign(rhs1_lit) ? aiger_var2lit(rhs1_node)+1 : aiger_var2lit(rhs1_node);
-        auto lhs_new_lit = aiger_var2lit(lhs_node);
-
-        aiger_add_and(new_model, lhs_new_lit, rhs0_new_lit, rhs1_new_lit);
-        node_create_map[lhs_node] = 1;
-    }
-    for(int i = 0; i < model -> num_outputs; i ++){
-        auto output_lit = model->outputs[i].lit;
-        auto output_node = condeq_check.lit_node_map[aiger_strip(output_lit)];
-        auto output_new_lit = aiger_sign(output_lit) ? aiger_var2lit(output_node)+1 : aiger_var2lit(output_node);
-
-        aiger_add_output(new_model, output_new_lit, 0);
-    }
-
-    std::cout << "new aiger model MIAO:" << std::endl;
-    std::cout << new_model -> maxvar << std::endl;
-    std::cout << new_model -> num_inputs << std::endl;
-    std::cout << new_model -> num_ands << std::endl;
-    std::cout << new_model -> num_outputs << std::endl;
-
-    FILE *new_aig = fopen ("new.aig", "w");
-
-    aiger_write_to_file(new_model, aiger_binary_mode, new_aig);    // triggers 'aig_reencode'
-
-    std::cout << "after reencode new aiger model MIAO:" << std::endl;
-    std::cout << new_model -> maxvar << std::endl;
-    std::cout << new_model -> num_inputs << std::endl;
-    std::cout << new_model -> num_ands << std::endl;
-    std::cout << new_model -> num_outputs << std::endl;
-
-    aiger_reset(new_model);
-}
-
 void create_aiger_after_condec(aiger * model, CondEC &condeq_check, const char *new_file){  // for conditional cec create new aig
     aiger * new_model;
     new_model = aiger_init();
@@ -126,7 +68,7 @@ void create_aiger_after_condec(aiger * model, CondEC &condeq_check, const char *
 
         auto rhs0_node = condeq_check.lit_node_map[aiger_strip(rhs0_lit)];
         auto rhs1_node = condeq_check.lit_node_map[aiger_strip(rhs1_lit)];
-        auto lhs_node  = condeq_check.lit_node_map[lhs_lit];                    // maybe some bug: lhs_lit -> lhs_node, but rhs0_lit and rhs1_lit -> node which maybe not connect to lhs_node
+        auto lhs_node  = condeq_check.lit_node_map[lhs_lit];
         
         if(node_var_map.find(lhs_node) != node_var_map.end()){
             continue;
@@ -218,17 +160,17 @@ int main(int argc, char ** argv) {
     model->outputs[1].lit = aiger_var2lit(model->maxvar);
     aiger_reencode(model);
 
+    // create output+condition aig
+        // FILE *output2_aig = fopen ("output2_aig", "w");
+        // aiger_write_to_file(model, aiger_binary_mode, output2_aig);
+        // use aigsplit to get cond.aig
+        // use abc to transfer cond.aig to cond.cnf
+        // use cryptominisat to sat cond.cnf for getting initial sim hash and sim data
+
     // conditonal equivalence checking
     PicoSAT *picosat;
-    picosat = picosat_init();
-    picosat_set_verbosity (picosat, 0);
-    picosat_set_prefix (picosat, "c [picosat] ");
-
     unsigned int miter_output = model -> outputs[0].lit;
     auto condition_output = model -> outputs[1].lit;
-
-
-    // conditional equivalence checking
 
 auto clk_start = std::chrono::high_resolution_clock::now();
 
@@ -247,9 +189,6 @@ auto clk_end = std::chrono::high_resolution_clock::now();
     create_aiger_after_condec(model, condeq_check, new_file); // after condec, we merge condition and output and create new aig
 
     aiger_reset(model);
-    
-    
-
     return 0;
 }
 
@@ -282,3 +221,61 @@ auto clk_end = std::chrono::high_resolution_clock::now();
     // condeq_check.unit(satvar);
     // int res = picosat_sat(picosat, -1);
     // std::cout << res << std::endl;  //return 10 -> sat, 20 -> unsat, 0 -> unknow
+
+//     void create_aiger_after_cec(aiger * model, CondEC &condeq_check){  // for normal cec create new aig
+//     aiger * new_model;
+//     new_model = aiger_init();
+//     std::map<unsigned, int> node_create_map;
+
+//     for(int i = 0; i < model -> num_inputs; i ++){
+//         auto input_lit = model->inputs[i].lit;
+//         auto input_node = condeq_check.lit_node_map[input_lit];
+//         aiger_add_input(new_model, aiger_var2lit(input_node), 0);
+//     }
+//     for(int i = 0; i < model -> num_ands; i ++){
+//         auto rhs0_lit = model -> ands[i].rhs0;
+//         auto rhs1_lit = model -> ands[i].rhs1;
+//         auto lhs_lit  = model -> ands[i].lhs;
+
+//         auto rhs0_node = condeq_check.lit_node_map[aiger_strip(rhs0_lit)];
+//         auto rhs1_node = condeq_check.lit_node_map[aiger_strip(rhs1_lit)];
+//         auto lhs_node  = condeq_check.lit_node_map[lhs_lit];
+        
+//         if(node_create_map.find(lhs_node) != node_create_map.end()){
+//             assert(node_create_map.find(lhs_node)->second == 1);
+//             continue;
+//         }
+        
+//         auto rhs0_new_lit = aiger_sign(rhs0_lit) ? aiger_var2lit(rhs0_node)+1 : aiger_var2lit(rhs0_node);
+//         auto rhs1_new_lit = aiger_sign(rhs1_lit) ? aiger_var2lit(rhs1_node)+1 : aiger_var2lit(rhs1_node);
+//         auto lhs_new_lit = aiger_var2lit(lhs_node);
+
+//         aiger_add_and(new_model, lhs_new_lit, rhs0_new_lit, rhs1_new_lit);
+//         node_create_map[lhs_node] = 1;
+//     }
+//     for(int i = 0; i < model -> num_outputs; i ++){
+//         auto output_lit = model->outputs[i].lit;
+//         auto output_node = condeq_check.lit_node_map[aiger_strip(output_lit)];
+//         auto output_new_lit = aiger_sign(output_lit) ? aiger_var2lit(output_node)+1 : aiger_var2lit(output_node);
+
+//         aiger_add_output(new_model, output_new_lit, 0);
+//     }
+
+//     std::cout << "new aiger model MIAO:" << std::endl;
+//     std::cout << new_model -> maxvar << std::endl;
+//     std::cout << new_model -> num_inputs << std::endl;
+//     std::cout << new_model -> num_ands << std::endl;
+//     std::cout << new_model -> num_outputs << std::endl;
+
+//     FILE *new_aig = fopen ("new.aig", "w");
+
+//     aiger_write_to_file(new_model, aiger_binary_mode, new_aig);    // triggers 'aig_reencode'
+
+//     std::cout << "after reencode new aiger model MIAO:" << std::endl;
+//     std::cout << new_model -> maxvar << std::endl;
+//     std::cout << new_model -> num_inputs << std::endl;
+//     std::cout << new_model -> num_ands << std::endl;
+//     std::cout << new_model -> num_outputs << std::endl;
+
+//     aiger_reset(new_model);
+// }
