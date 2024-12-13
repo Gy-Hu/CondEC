@@ -9,7 +9,8 @@ Conditional Equivalence Checking
     ./configure.sh && make
     cd ..
 
-    cd ./picosat
+    git clone https://github.com/arminbiere/cadical.git
+    cd cadical
     ./configure.sh && make
     cd ..
 

@@ -8,7 +8,6 @@
 
 extern "C" {
 #include "aiger/aiger.h"
-#include "picosat/picosat.h"
 }
 
 /*  create a hash for and-gates node (lhs)
@@ -126,17 +125,18 @@ void CondEC::update_all_sim_data(unsigned int lhs_lit_end){
 bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar){
     for(auto &other_node : cec_candidate){
         // assume
-        picosat_push(picosat_);
+        auto assumption = create_satvar();
         
-        create_andgate(lhs_satvar, rhs0_satvar, rhs1_satvar);
+        create_andgate(lhs_satvar, rhs0_satvar, rhs1_satvar, assumption); // clause OR assumption
         auto miter_i1 = node_satvar_map[other_node];
         auto miter_i2 = lhs_satvar;
-        auto miter_o = picosat_inc_max_var(picosat_);
-        create_miter(miter_o, miter_i1, miter_i2);
-        unit(miter_o);
-        int res = picosat_sat(picosat_, 10000);   // decision_limit 10000?, we hope to balance cec time and merge number
+        auto miter_o = create_satvar();
+        create_miter(miter_o, miter_i1, miter_i2, assumption);  // clause OR assumption
+        unit(miter_o, assumption);  // clause OR assumption
+        solver_->assume(-assumption);   // make assumption = flase, enable clause of this function
+        int res = solver_ -> solve();   // decision_limit 10000?, we hope to balance cec time and merge number
 
-        if(res == PICOSAT_SATISFIABLE){
+        if(res == CaDiCaL::SATISFIABLE){
             // add more sim round and sim data
             cec_sat_num++;
             if (new_input_pattern_vec.empty())
@@ -145,23 +145,25 @@ bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equival
                 auto input_lit = model_ -> inputs[i].lit;
                 auto input_node = lit_node_map[input_lit];
                 auto input_satvar = node_satvar_map[input_node];
-                int sat_assignment = picosat_deref(picosat_, input_satvar);
-                new_input_pattern_vec.at(i).push_back(sat_assignment == 1);
+
+                int sat_assignment = solver_ -> val(input_satvar);
+                bool sim_bit = (sat_assignment > 0) ? 1 : 0;
+                new_input_pattern_vec.at(i).push_back(sim_bit);
             }
         }
-        else if(res == PICOSAT_UNKNOWN){
+        else if(res == CaDiCaL::UNKNOWN){
             // nothing to do
             cec_unknow_num++;
         }
-        else if(res == PICOSAT_UNSATISFIABLE){
+        else if(res == CaDiCaL::UNSATISFIABLE){
             // merge equivalence node
             cec_unsat_num++;
             equivalence_node = other_node;
-            picosat_pop(picosat_);
+            unit(assumption);   // make assumption = true, disable clause of this function
             return true;    // merge
         }
 
-        picosat_pop(picosat_);
+        unit(assumption);   // make assumption = true, disable clause of this function
     }
 
     return false;   // no merge
@@ -179,7 +181,7 @@ void CondEC::cec_inputs_register(){
         node_lit_map[input_node] = input_lit;
         
         // node -> sat var
-        auto satvar = picosat_inc_max_var(picosat_);
+        auto satvar = create_satvar();
         node_satvar_map[input_node] = satvar;
 
         // structral hash -> node
@@ -252,7 +254,7 @@ void CondEC::cec_condition_register(unsigned int &condition_output){
             // node_lit_map[and_node] = cur_lit;
 
             // node <-> sat var
-            auto satvar = picosat_inc_max_var(picosat_);
+            auto satvar = create_satvar();
             node_satvar_map[and_node] = satvar;
 
             // add cnf
@@ -370,7 +372,7 @@ void CondEC::cec_ands_register(){
             satvar = get_satvar(lhs_lit);
         }
         else{
-            satvar = picosat_inc_max_var(picosat_);
+            satvar = create_satvar();
         }
 
         bool merge = false;
@@ -472,7 +474,7 @@ void CondEC::cec_ands_register(){
     auto lhs_lit  = model_ -> outputs[0].lit;
     auto satvar =get_satvar(lhs_lit);
     unit(satvar);
-    int res = picosat_sat(picosat_, -1);    //return 10 = sat, 20 = unsat, 0 = unknow
+    int res = solver_ -> solve();    //return 10 = sat, 20 = unsat, 0 = unknow
     if(res == 10)
         std::cout << "final sat result: SAT" << std::endl;
     else if(res == 20)

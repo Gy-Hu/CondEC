@@ -5,10 +5,10 @@
 #include <vector>
 #include <map>
 
+#include "cadical/src/cadical.hpp"
 
 extern "C" {
 #include "aiger/aiger.h"
-#include "picosat/picosat.h"
 }
 
 // #define SIM_PATTERN {0x5555555555555555UL, 0x3333333333333333UL, 0xf0f0faf0faf0f0ffUL, 0xff0aff0aff0affffUL, 0xffff0aa0ffff0f0fUL, 0xffffffffffffffffUL}
@@ -24,7 +24,7 @@ class CondEC
 private:
     /* data */
     aiger * model_;
-    PicoSAT *picosat_;
+    CaDiCaL::Solver *solver_;
     unsigned node_number;   // node is our new model node
     unsigned structural_hash_merge_num;
     unsigned cec_merge_num;
@@ -37,6 +37,10 @@ private:
     int new_sim_data_num;   // new sim data number
 
     unsigned create_new_node(){ return ++node_number;}
+
+    // cadical
+    int solver_satvar;
+    int create_satvar(){ return ++solver_satvar;}
 
 public:
     /*  new map:
@@ -109,51 +113,56 @@ public:
     void update_all_sim_data(unsigned int lhs_lit_end);
 
 
-    CondEC(aiger *model, PicoSAT *picosat): model_(model), picosat_(picosat), node_number(0), structural_hash_merge_num(0), cec_merge_num(0), cec_sat_num(0), cec_unknow_num(0), cec_unsat_num(0),
-                new_sim_data_num(0), sim_pattern_hash_vec(SIM_PATTERN){picosat_ = picosat_init(); picosat_set_verbosity (picosat_, 0); picosat_set_prefix (picosat_, "c [picosat] ");};
+    CondEC(aiger *model, CaDiCaL::Solver *cadical): model_(model), solver_(cadical), node_number(0), structural_hash_merge_num(0), cec_merge_num(0), cec_sat_num(0), cec_unknow_num(0), cec_unsat_num(0),
+                new_sim_data_num(0), sim_pattern_hash_vec(SIM_PATTERN), solver_satvar(0){};
 
-    // picosat for sat
+
+    // cadical sat
     void inline unit(int a)
     {
-        picosat_add(picosat_, a);
-        picosat_add(picosat_, 0);
-    }
-
-    void inline binary(int a, int b)
-    {
-        picosat_add(picosat_, a);
-        picosat_add(picosat_, b);
-        picosat_add(picosat_, 0);
-    }
-    
-    void inline ternary(int a, int b, int c)
-    {
-        picosat_add(picosat_, a);
-        picosat_add(picosat_, b);
-        picosat_add(picosat_, c);
-        picosat_add(picosat_, 0);
+        solver_ -> clause(a);
     }
 
     void inline create_miter(int c, int a, int b)
     {
         // c = a xor b
         // cnf: (𝑎∨𝑏∨¬𝑐)∧(¬𝑎∨¬𝑏∨¬𝑐)∧(¬𝑎∨𝑏∨𝑐)∧(𝑎∨¬𝑏∨𝑐)
-        ternary(a, b, -c);
-        ternary(-a, -b, -c);
-        ternary(-a, b, c);
-        ternary(a, -b, c);
+        solver_ -> clause(a, b, -c);
+        solver_ -> clause(-a, -b, -c);
+        solver_ -> clause(-a, b, c);
+        solver_ -> clause(a, -b, c);
     }
 
     void inline create_andgate(int lhs, int rhs0, int rhs1)
     {   
         // satvar_lhs = satvar_rhs0 and satvar_rhs1
-        binary(-lhs, rhs0);
-        binary(-lhs, rhs1);
-        ternary(lhs, -rhs0, -rhs1);
+        solver_ -> clause(-lhs, rhs0);
+        solver_ -> clause(-lhs, rhs1);
+        solver_ -> clause(lhs, -rhs0, -rhs1);
     }
 
+    void inline unit(int a, int assumption)
+    {
+        solver_ -> clause(a, assumption);
+    }
 
+    void inline create_miter(int c, int a, int b, int assumption)
+    {
+        // c = a xor b
+        // cnf: (𝑎∨𝑏∨¬𝑐)∧(¬𝑎∨¬𝑏∨¬𝑐)∧(¬𝑎∨𝑏∨𝑐)∧(𝑎∨¬𝑏∨𝑐)
+        solver_ -> clause(a, b, -c, assumption);
+        solver_ -> clause(-a, -b, -c, assumption);
+        solver_ -> clause(-a, b, c, assumption);
+        solver_ -> clause(a, -b, c, assumption);
+    }
 
+    void inline create_andgate(int lhs, int rhs0, int rhs1, int assumption)
+    {   
+        // satvar_lhs = satvar_rhs0 and satvar_rhs1
+        solver_ -> clause(-lhs, rhs0, assumption);
+        solver_ -> clause(-lhs, rhs1, assumption);
+        solver_ -> clause(lhs, -rhs0, -rhs1, assumption);
+    }
 };
 
 
