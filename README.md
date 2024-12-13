@@ -5,13 +5,12 @@ Conditional Equivalence Checking
 
     git clone https://github.com/arminbiere/aiger
     cd aiger
-    ./setup.sh
     ./configure.sh && make
     cd ..
 
     git clone https://github.com/arminbiere/cadical.git
     cd cadical
-    ./configure.sh && make
+    ./configure && make
     cd ..
 
 ### run

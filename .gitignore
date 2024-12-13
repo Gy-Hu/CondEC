@@ -2,6 +2,7 @@
 *.d
 .vscode/*
 aiger/
+cadical/
 
 # Compiled Object files
 *.slo
