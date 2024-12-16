@@ -3,6 +3,8 @@
 .vscode/*
 aiger/
 cadical/
+log/
+new_aig/
 
 # Compiled Object files
 *.slo
@@ -33,4 +35,5 @@ cadical/
 *.exe
 *.out
 *.app
-aiger_cec
+cec_icond
+cec_ocond

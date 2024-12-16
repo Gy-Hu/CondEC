@@ -134,6 +134,7 @@ bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equival
         create_miter(miter_o, miter_i1, miter_i2, assumption);  // clause OR assumption
         unit(miter_o, assumption);  // clause OR assumption
         solver_->assume(-assumption);   // make assumption = flase, enable clause of this function
+        solver_ ->limit("decisions", 20000);
         int res = solver_ -> solve();   // decision_limit 10000?, we hope to balance cec time and merge number
 
         if(res == CaDiCaL::SATISFIABLE){
@@ -171,7 +172,7 @@ bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equival
 
 void CondEC::cec_inputs_register(){
     for(int i = 0; i < model_ -> num_inputs; i ++){
-        std::cout << "cec_ands_register (" << (i+1) << "/" << model_->num_inputs << ")" << std::endl;
+        std::cout << "cec_inputs_register (" << (i+1) << "/" << model_->num_inputs << ")" << std::endl;
         // get the lit from aiger model
         auto input_lit = model_ -> inputs[i].lit;
 
@@ -190,6 +191,57 @@ void CondEC::cec_inputs_register(){
 
         // node <-> sim hash
         auto sim_hash = get_sim_pattern_hash(i);
+        node_simulation_hash_map[input_node] = sim_hash;
+        simulation_hash_nodevec_map[sim_hash].push_back(input_node);
+        std::cout << "input lit: " << input_lit << " <-> node: " << input_node << " <-> satvar: " << satvar << std::endl;
+        std::cout << "input node " << input_node << " simulation hash: " << node_simulation_hash_map[input_node] << std::endl;
+
+        // node -> sim data
+        // for(int sim_round = 0; sim_round < SIM_ROUND; sim_round++){
+        //     node_simulation_data_map[input_node].push_back(get_random_uint64());    // bug!!! reason: random sim data not sat condition
+        //     std::cout << "sim round " << sim_round << ", simulation data: " << node_simulation_data_map[input_node].at(sim_round) << std::endl;
+        // }
+
+        // for test
+        node_simulation_data_map[input_node].push_back(sim_hash);   // just 1 sim round
+
+        std::cout << "----------------------------------------------------------------------------------------" << std::endl;
+    }
+}
+
+void CondEC::cec_inputs_register(std::map<unsigned, uint64_t> input_cond_map){
+    for(int i = 0; i < model_ -> num_inputs; i ++){
+        std::cout << "cec_inputs_register (" << (i+1) << "/" << model_->num_inputs << ")" << std::endl;
+        // get the lit from aiger model
+        auto input_lit = model_ -> inputs[i].lit;
+
+        // lit <-> node
+        auto input_node = create_new_node();
+        lit_node_map[input_lit] = input_node;
+        node_lit_map[input_node] = input_lit;
+        
+        // node -> sat var
+        auto satvar = create_satvar();
+        node_satvar_map[input_node] = satvar;
+
+        // structral hash -> node
+        // structural_hash_nodevec_map[input_lit].push_back(input_node);
+        structural_hash_nodevec_map[input_node].push_back(input_node);
+
+        // node <-> sim hash
+        // if input have input-condition
+        bool cond_enable = false;
+        uint64_t cond_input_data;
+        if(input_cond_map.find(i) != input_cond_map.end()){ 
+            cond_enable = true;
+            cond_input_data = input_cond_map[i];
+            if(cond_input_data == 0x0000000000000000UL)
+                unit(-satvar);
+            else if(cond_input_data == 0xffffffffffffffffUL)
+                unit(satvar);
+        }
+
+        auto sim_hash = cond_enable ? cond_input_data : get_sim_pattern_hash(i);
         node_simulation_hash_map[input_node] = sim_hash;
         simulation_hash_nodevec_map[sim_hash].push_back(input_node);
         std::cout << "input lit: " << input_lit << " <-> node: " << input_node << " <-> satvar: " << satvar << std::endl;
@@ -472,7 +524,7 @@ void CondEC::cec_ands_register(){
 
     // final sat for output
     auto lhs_lit  = model_ -> outputs[0].lit;
-    auto satvar =get_satvar(lhs_lit);
+    auto satvar = get_satvar(lhs_lit);
     unit(satvar);
     int res = solver_ -> solve();    //return 10 = sat, 20 = unsat, 0 = unknow
     if(res == 10)

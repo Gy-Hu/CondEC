@@ -96,6 +96,7 @@ public:
     /********************************* main function for condec *****************************************/
     // cec inputs stage
     void cec_inputs_register();
+    void cec_inputs_register(std::map<unsigned, uint64_t> input_cond_map);  // for input-condition
 
     // cec conditional outputs stage
     void cec_condition_register(unsigned int &condition_output);

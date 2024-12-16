@@ -89,25 +89,25 @@ void create_aiger_after_condec(aiger * model, CondEC &condeq_check, const char *
         aiger_add_output(new_model, output_new_lit, 0);
     }
 
-    std::cout << "new aiger model MIAO:" << std::endl;
-    std::cout << new_model -> maxvar << std::endl;
-    std::cout << new_model -> num_inputs << std::endl;
-    std::cout << new_model -> num_ands << std::endl;
-    std::cout << new_model -> num_outputs << std::endl;
+    std::cout << "new aiger model MIOA:" << std::endl;
+    std::cout << "M: " << new_model -> maxvar << std::endl;
+    std::cout << "I: " << new_model -> num_inputs << std::endl;
+    std::cout << "0: " << new_model -> num_outputs << std::endl;
+    std::cout << "A: " << new_model -> num_ands << std::endl;
 
-    // merge 2 output
-    aiger_add_and(new_model, aiger_var2lit(new_model->maxvar + 1), new_model -> outputs[0].lit, new_model -> outputs[1].lit);
-    new_model->num_outputs = 1;
-    new_model->outputs[0].lit = aiger_var2lit(new_model->maxvar);
+    // // merge 2 output
+    // aiger_add_and(new_model, aiger_var2lit(new_model->maxvar + 1), new_model -> outputs[0].lit, new_model -> outputs[1].lit);
+    // new_model->num_outputs = 1;
+    // new_model->outputs[0].lit = aiger_var2lit(new_model->maxvar);
 
     FILE *new_aig_merge = fopen (new_file, "w");
     aiger_write_to_file(new_model, aiger_binary_mode, new_aig_merge);    // triggers 'aig_reencode'
 
-    std::cout << "after reencode new aiger model MIAO:" << std::endl;
-    std::cout << new_model -> maxvar << std::endl;
-    std::cout << new_model -> num_inputs << std::endl;
-    std::cout << new_model -> num_ands << std::endl;
-    std::cout << new_model -> num_outputs << std::endl;
+    std::cout << "after reencode new aiger model MIOA:" << std::endl;
+    std::cout << "M: " << new_model -> maxvar << std::endl;
+    std::cout << "I: " << new_model -> num_inputs << std::endl;
+    std::cout << "0: " << new_model -> num_outputs << std::endl;
+    std::cout << "A: " << new_model -> num_ands << std::endl;
 
     aiger_reset(new_model);
 }
@@ -131,51 +131,28 @@ int main(int argc, char ** argv) {
        model->num_outputs,
        model->num_ands);
 
-    // find which is output, which is conditon，by computing depth of outputs
-    std::map<int, int> depth_map;
-    int max_depth = 0;
+    /*******************************conditonal equivalence checking*******************************/
 
-    for (unsigned i = 1; i <= model ->maxvar +1; i++) {
-        depth_map[i] = -1;  // initialize depth map, -1 = no compute
-    }
+    // create input-condition, reference to io_map
+    std::map<unsigned, uint64_t> input_cond_map;
+    input_cond_map[10] = 0x0000000000000000UL;  // control[0] = 0
+    input_cond_map[11] = 0x0000000000000000UL;  // control[1] = 0
+    input_cond_map[12] = 0x0000000000000000UL;  // control[2] = 0
+    input_cond_map[13] = 0xffffffffffffffffUL;  // control[3] = 1
 
-    for(int i = 0; i < model -> num_outputs; i ++){
-        auto output_lit = model -> outputs[i].lit;
-        int depth = compute_depth(output_lit, model, depth_map);
-        max_depth = (depth > max_depth) ? depth : max_depth;
-        std::cout << "Depth of output " << output_lit << ": " << depth << std::endl;
-    }
-    std::cout << "Max Depth of output: " << max_depth << std::endl;
-
-    // merge 2 condition outputs to 1 condition output 
-    aiger_add_and(model, aiger_var2lit(model->maxvar + 1), model -> outputs[1].lit, model -> outputs[2].lit);
-    model->num_outputs = 2;
-    model->outputs[1].lit = aiger_var2lit(model->maxvar);
-    aiger_reencode(model);
-
-    // create output+condition aig
-        // FILE *output2_aig = fopen ("output2_aig", "w");
-        // aiger_write_to_file(model, aiger_binary_mode, output2_aig);
-        // use aigsplit to get cond.aig
-        // use abc to transfer cond.aig to cond.cnf
-        // use cryptominisat to sat cond.cnf for getting initial sim hash and sim data
-
-    // conditonal equivalence checking
-    unsigned int miter_output = model -> outputs[0].lit;
-    auto condition_output = model -> outputs[1].lit;
-    
 auto clk_start = std::chrono::high_resolution_clock::now();
 
     CaDiCaL::Solver *solver = new CaDiCaL::Solver;
     CondEC condeq_check(model, solver);
-    condeq_check.cec_inputs_register();
-    condeq_check.cec_condition_register(condition_output);
+    condeq_check.cec_inputs_register(input_cond_map);   // i-condec
     condeq_check.cec_ands_register();
 
 auto clk_end = std::chrono::high_resolution_clock::now();
 
     std::chrono::duration<double> cec_time = clk_end - clk_start;
     std::cout << "conditional equilvalence time: " << cec_time.count() << " seconds\n";
+
+    /*******************************conditonal equivalence checking*******************************/
 
     // const char *new_file = argv[2];
     const char *new_file = "new.aig";
