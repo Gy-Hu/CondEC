@@ -8,7 +8,6 @@
 
 extern "C" {
 #include "aiger/aiger.h"
-#include "picosat/picosat.h"
 }
 
 /*  create a hash for and-gates node (lhs)
@@ -126,17 +125,21 @@ void CondEC::update_all_sim_data(unsigned int lhs_lit_end){
 bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar){
     for(auto &other_node : cec_candidate){
         // assume
-        picosat_push(picosat_);
+        auto assumption = create_satvar();
         
-        create_andgate(lhs_satvar, rhs0_satvar, rhs1_satvar);
+        create_andgate(lhs_satvar, rhs0_satvar, rhs1_satvar, assumption); // clause OR assumption
         auto miter_i1 = node_satvar_map[other_node];
         auto miter_i2 = lhs_satvar;
-        auto miter_o = picosat_inc_max_var(picosat_);
-        create_miter(miter_o, miter_i1, miter_i2);
-        unit(miter_o);
-        int res = picosat_sat(picosat_, 10000);   // decision_limit 10000?, we hope to balance cec time and merge number
+        auto miter_o = create_satvar();
+        create_miter(miter_o, miter_i1, miter_i2, assumption);  // clause OR assumption
+        unit(miter_o, assumption);  // clause OR assumption
 
-        if(res == PICOSAT_SATISFIABLE){
+        kissat_assume(solver_, -assumption);    // make assumption = flase, enable clause of this function
+        kissat_set_decision_limit(solver_, 10000);
+        kissat_set_conflict_limit(solver_, 10000);
+        int res = kissat_solve(solver_);   // decision_limit 10000?, we hope to balance cec time and merge number
+
+        if(res == 10){
             // add more sim round and sim data
             cec_sat_num++;
             if (new_input_pattern_vec.empty())
@@ -145,23 +148,25 @@ bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equival
                 auto input_lit = model_ -> inputs[i].lit;
                 auto input_node = lit_node_map[input_lit];
                 auto input_satvar = node_satvar_map[input_node];
-                int sat_assignment = picosat_deref(picosat_, input_satvar);
-                new_input_pattern_vec.at(i).push_back(sat_assignment == 1);
+
+                int sat_assignment = kissat_value(solver_, input_satvar);
+                bool sim_bit = (sat_assignment > 0) ? 1 : 0;
+                new_input_pattern_vec.at(i).push_back(sim_bit);
             }
         }
-        else if(res == PICOSAT_UNKNOWN){
-            // nothing to do
-            cec_unknow_num++;
-        }
-        else if(res == PICOSAT_UNSATISFIABLE){
+        else if(res == 20){
             // merge equivalence node
             cec_unsat_num++;
             equivalence_node = other_node;
-            picosat_pop(picosat_);
+            unit(assumption);   // make assumption = true, disable clause of this function
             return true;    // merge
         }
+        else{
+            // nothing to do
+            cec_unknow_num++;
+        }
 
-        picosat_pop(picosat_);
+        unit(assumption);   // make assumption = true, disable clause of this function
     }
 
     return false;   // no merge
@@ -169,7 +174,7 @@ bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equival
 
 void CondEC::cec_inputs_register(){
     for(int i = 0; i < model_ -> num_inputs; i ++){
-        std::cout << "cec_ands_register (" << (i+1) << "/" << model_->num_inputs << ")" << std::endl;
+        std::cout << "cec_inputs_register (" << (i+1) << "/" << model_->num_inputs << ")" << std::endl;
         // get the lit from aiger model
         auto input_lit = model_ -> inputs[i].lit;
 
@@ -179,7 +184,7 @@ void CondEC::cec_inputs_register(){
         node_lit_map[input_node] = input_lit;
         
         // node -> sat var
-        auto satvar = picosat_inc_max_var(picosat_);
+        auto satvar = create_satvar();
         node_satvar_map[input_node] = satvar;
 
         // structral hash -> node
@@ -188,6 +193,57 @@ void CondEC::cec_inputs_register(){
 
         // node <-> sim hash
         auto sim_hash = get_sim_pattern_hash(i);
+        node_simulation_hash_map[input_node] = sim_hash;
+        simulation_hash_nodevec_map[sim_hash].push_back(input_node);
+        std::cout << "input lit: " << input_lit << " <-> node: " << input_node << " <-> satvar: " << satvar << std::endl;
+        std::cout << "input node " << input_node << " simulation hash: " << node_simulation_hash_map[input_node] << std::endl;
+
+        // node -> sim data
+        // for(int sim_round = 0; sim_round < SIM_ROUND; sim_round++){
+        //     node_simulation_data_map[input_node].push_back(get_random_uint64());    // bug!!! reason: random sim data not sat condition
+        //     std::cout << "sim round " << sim_round << ", simulation data: " << node_simulation_data_map[input_node].at(sim_round) << std::endl;
+        // }
+
+        // for test
+        node_simulation_data_map[input_node].push_back(sim_hash);   // just 1 sim round
+
+        std::cout << "----------------------------------------------------------------------------------------" << std::endl;
+    }
+}
+
+void CondEC::cec_inputs_register(std::map<unsigned, uint64_t> input_cond_map){
+    for(int i = 0; i < model_ -> num_inputs; i ++){
+        std::cout << "cec_inputs_register (" << (i+1) << "/" << model_->num_inputs << ")" << std::endl;
+        // get the lit from aiger model
+        auto input_lit = model_ -> inputs[i].lit;
+
+        // lit <-> node
+        auto input_node = create_new_node();
+        lit_node_map[input_lit] = input_node;
+        node_lit_map[input_node] = input_lit;
+        
+        // node -> sat var
+        auto satvar = create_satvar();
+        node_satvar_map[input_node] = satvar;
+
+        // structral hash -> node
+        // structural_hash_nodevec_map[input_lit].push_back(input_node);
+        structural_hash_nodevec_map[input_node].push_back(input_node);
+
+        // node <-> sim hash
+        // if input have input-condition
+        bool cond_enable = false;
+        uint64_t cond_input_data;
+        if(input_cond_map.find(i) != input_cond_map.end()){ 
+            cond_enable = true;
+            cond_input_data = input_cond_map[i];
+            if(cond_input_data == 0x0000000000000000UL)
+                unit(-satvar);
+            else if(cond_input_data == 0xffffffffffffffffUL)
+                unit(satvar);
+        }
+
+        auto sim_hash = cond_enable ? cond_input_data : get_sim_pattern_hash(i);
         node_simulation_hash_map[input_node] = sim_hash;
         simulation_hash_nodevec_map[sim_hash].push_back(input_node);
         std::cout << "input lit: " << input_lit << " <-> node: " << input_node << " <-> satvar: " << satvar << std::endl;
@@ -252,7 +308,7 @@ void CondEC::cec_condition_register(unsigned int &condition_output){
             // node_lit_map[and_node] = cur_lit;
 
             // node <-> sat var
-            auto satvar = picosat_inc_max_var(picosat_);
+            auto satvar = create_satvar();
             node_satvar_map[and_node] = satvar;
 
             // add cnf
@@ -370,7 +426,7 @@ void CondEC::cec_ands_register(){
             satvar = get_satvar(lhs_lit);
         }
         else{
-            satvar = picosat_inc_max_var(picosat_);
+            satvar = create_satvar();
         }
 
         bool merge = false;
@@ -470,14 +526,14 @@ void CondEC::cec_ands_register(){
 
     // final sat for output
     auto lhs_lit  = model_ -> outputs[0].lit;
-    auto satvar =get_satvar(lhs_lit);
+    auto satvar = get_satvar(lhs_lit);
     unit(satvar);
-    int res = picosat_sat(picosat_, -1);    //return 10 = sat, 20 = unsat, 0 = unknow
+    int res = kissat_solve(solver_);    //return 10 = sat, 20 = unsat, 0 = unknow
     if(res == 10)
         std::cout << "final sat result: SAT" << std::endl;
     else if(res == 20)
         std::cout << "final sat result: UNSAT" << std::endl;
-    else if(res == 0)
+    else
         std::cout << "final sat result: UNKNOW" << std::endl;
     std::cout << "-------------------------------------" << std::endl;
 

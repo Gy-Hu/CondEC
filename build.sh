@@ -3,10 +3,10 @@
 echo "build start"
 
 g++ -g -c condec.cpp -o condec.o
-g++ -g aiger_cec.cpp aiger/aiger.o picosat/picosat.o condec.o -o aiger_cec
+g++ -g cec_ocond.cpp aiger/aiger.o kissat_extras/build/libkissat.a condec.o -o cec_ocond
+g++ -g cec_icond.cpp aiger/aiger.o kissat_extras/build/libkissat.a condec.o -o cec_icond
 
 echo "build finished"
 
-echo "run ./aiger_cec"
-./aiger_cec ./aig_test/cec_cycle4.aig
-#./aiger_cec cec_cycle4.aig
+#./aiger_cec ./aig_test/cec_cycle4.aig
+#./aiger_cec_precond ./alu_test/alu_miter.aig

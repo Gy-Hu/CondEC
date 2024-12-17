@@ -5,12 +5,11 @@
 #include <cassert>
 #include <chrono>
 
-
 #include "condec.h"
 
 extern "C" {
 #include "aiger/aiger.h"
-#include "picosat/picosat.h"
+#include "kissat_extras/src/kissat.h"
 }
 
 
@@ -90,11 +89,11 @@ void create_aiger_after_condec(aiger * model, CondEC &condeq_check, const char *
         aiger_add_output(new_model, output_new_lit, 0);
     }
 
-    std::cout << "new aiger model MIAO:" << std::endl;
-    std::cout << new_model -> maxvar << std::endl;
-    std::cout << new_model -> num_inputs << std::endl;
-    std::cout << new_model -> num_ands << std::endl;
-    std::cout << new_model -> num_outputs << std::endl;
+    std::cout << "new aiger model MIOA:" << std::endl;
+    std::cout << "M: " << new_model -> maxvar << std::endl;
+    std::cout << "I: " << new_model -> num_inputs << std::endl;
+    std::cout << "0: " << new_model -> num_outputs << std::endl;
+    std::cout << "A: " << new_model -> num_ands << std::endl;
 
     // merge 2 output
     aiger_add_and(new_model, aiger_var2lit(new_model->maxvar + 1), new_model -> outputs[0].lit, new_model -> outputs[1].lit);
@@ -104,11 +103,11 @@ void create_aiger_after_condec(aiger * model, CondEC &condeq_check, const char *
     FILE *new_aig_merge = fopen (new_file, "w");
     aiger_write_to_file(new_model, aiger_binary_mode, new_aig_merge);    // triggers 'aig_reencode'
 
-    std::cout << "after reencode new aiger model MIAO:" << std::endl;
-    std::cout << new_model -> maxvar << std::endl;
-    std::cout << new_model -> num_inputs << std::endl;
-    std::cout << new_model -> num_ands << std::endl;
-    std::cout << new_model -> num_outputs << std::endl;
+    std::cout << "after reencode new aiger model MIOA:" << std::endl;
+    std::cout << "M: " << new_model -> maxvar << std::endl;
+    std::cout << "I: " << new_model -> num_inputs << std::endl;
+    std::cout << "0: " << new_model -> num_outputs << std::endl;
+    std::cout << "A: " << new_model -> num_ands << std::endl;
 
     aiger_reset(new_model);
 }
@@ -148,12 +147,6 @@ int main(int argc, char ** argv) {
     }
     std::cout << "Max Depth of output: " << max_depth << std::endl;
 
-    /*  cycle4:
-        Depth of output 18811: 3008
-        Depth of output 19064: 128
-        Depth of output 19127: 31
-    */
-
     // merge 2 condition outputs to 1 condition output 
     aiger_add_and(model, aiger_var2lit(model->maxvar + 1), model -> outputs[1].lit, model -> outputs[2].lit);
     model->num_outputs = 2;
@@ -168,13 +161,15 @@ int main(int argc, char ** argv) {
         // use cryptominisat to sat cond.cnf for getting initial sim hash and sim data
 
     // conditonal equivalence checking
-    PicoSAT *picosat;
     unsigned int miter_output = model -> outputs[0].lit;
     auto condition_output = model -> outputs[1].lit;
-
+    
 auto clk_start = std::chrono::high_resolution_clock::now();
 
-    CondEC condeq_check(model, picosat);
+    kissat *solver;
+    solver = kissat_init();
+    kissat_set_option(solver, "quiet", 1);  // stop print kissat log
+    CondEC condeq_check(model, solver);
     condeq_check.cec_inputs_register();
     condeq_check.cec_condition_register(condition_output);
     condeq_check.cec_ands_register();
@@ -188,94 +183,8 @@ auto clk_end = std::chrono::high_resolution_clock::now();
     const char *new_file = "new.aig";
     create_aiger_after_condec(model, condeq_check, new_file); // after condec, we merge condition and output and create new aig
 
+    kissat_release(solver);
     aiger_reset(model);
     return 0;
+    
 }
-
-// Note:
-// int res = picosat_sat(picosat, -1);
-// std::cout << res << std::endl;  //return 10 -> sat, 20 -> unsat, 0 -> unknow
-
-
-// unsigned int a = aiger_lit2var(lit_list[0]); // get origin var, >> 1
-    // unsigned int a = aiger_strip(lit_list[0]);  // get unsigned lit, remove last bit
-    // aiger_sign(model->outputs[0].lit) // return 1 -> neg, 0 -> pos
-    // printf("var: %u\n", a);
-
-    // merge 3 outputs
-    // aiger_add_and(model, aiger_var2lit(model->maxvar + 1), lit_vec.at(0), lit_vec.at(1));
-    // aiger_add_and(model, aiger_var2lit(model->maxvar + 1), aiger_var2lit(model->maxvar), lit_vec.at(2));
-    // model->num_outputs = 1;
-    // model->outputs[0].lit = aiger_var2lit(model->maxvar);
-    // aiger_reencode(model);
-
-    //merge 2 outputs to condition, = merge aig file
-    // aiger_add_and(model, aiger_var2lit(model->maxvar + 1), lit_vec.at(1), lit_vec.at(2));
-    // model->num_outputs = 2;
-    // model->outputs[1].lit = aiger_var2lit(model->maxvar);
-    // aiger_reencode(model);
-
-    // test
-    // auto lhs_lit  = model -> outputs[0].lit;
-    // auto satvar = condeq_check.get_satvar(lhs_lit);
-    // condeq_check.unit(satvar);
-    // int res = picosat_sat(picosat, -1);
-    // std::cout << res << std::endl;  //return 10 -> sat, 20 -> unsat, 0 -> unknow
-
-//     void create_aiger_after_cec(aiger * model, CondEC &condeq_check){  // for normal cec create new aig
-//     aiger * new_model;
-//     new_model = aiger_init();
-//     std::map<unsigned, int> node_create_map;
-
-//     for(int i = 0; i < model -> num_inputs; i ++){
-//         auto input_lit = model->inputs[i].lit;
-//         auto input_node = condeq_check.lit_node_map[input_lit];
-//         aiger_add_input(new_model, aiger_var2lit(input_node), 0);
-//     }
-//     for(int i = 0; i < model -> num_ands; i ++){
-//         auto rhs0_lit = model -> ands[i].rhs0;
-//         auto rhs1_lit = model -> ands[i].rhs1;
-//         auto lhs_lit  = model -> ands[i].lhs;
-
-//         auto rhs0_node = condeq_check.lit_node_map[aiger_strip(rhs0_lit)];
-//         auto rhs1_node = condeq_check.lit_node_map[aiger_strip(rhs1_lit)];
-//         auto lhs_node  = condeq_check.lit_node_map[lhs_lit];
-        
-//         if(node_create_map.find(lhs_node) != node_create_map.end()){
-//             assert(node_create_map.find(lhs_node)->second == 1);
-//             continue;
-//         }
-        
-//         auto rhs0_new_lit = aiger_sign(rhs0_lit) ? aiger_var2lit(rhs0_node)+1 : aiger_var2lit(rhs0_node);
-//         auto rhs1_new_lit = aiger_sign(rhs1_lit) ? aiger_var2lit(rhs1_node)+1 : aiger_var2lit(rhs1_node);
-//         auto lhs_new_lit = aiger_var2lit(lhs_node);
-
-//         aiger_add_and(new_model, lhs_new_lit, rhs0_new_lit, rhs1_new_lit);
-//         node_create_map[lhs_node] = 1;
-//     }
-//     for(int i = 0; i < model -> num_outputs; i ++){
-//         auto output_lit = model->outputs[i].lit;
-//         auto output_node = condeq_check.lit_node_map[aiger_strip(output_lit)];
-//         auto output_new_lit = aiger_sign(output_lit) ? aiger_var2lit(output_node)+1 : aiger_var2lit(output_node);
-
-//         aiger_add_output(new_model, output_new_lit, 0);
-//     }
-
-//     std::cout << "new aiger model MIAO:" << std::endl;
-//     std::cout << new_model -> maxvar << std::endl;
-//     std::cout << new_model -> num_inputs << std::endl;
-//     std::cout << new_model -> num_ands << std::endl;
-//     std::cout << new_model -> num_outputs << std::endl;
-
-//     FILE *new_aig = fopen ("new.aig", "w");
-
-//     aiger_write_to_file(new_model, aiger_binary_mode, new_aig);    // triggers 'aig_reencode'
-
-//     std::cout << "after reencode new aiger model MIAO:" << std::endl;
-//     std::cout << new_model -> maxvar << std::endl;
-//     std::cout << new_model -> num_inputs << std::endl;
-//     std::cout << new_model -> num_ands << std::endl;
-//     std::cout << new_model -> num_outputs << std::endl;
-
-//     aiger_reset(new_model);
-// }

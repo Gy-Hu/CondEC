@@ -2,6 +2,9 @@
 *.d
 .vscode/*
 aiger/
+kissat_extras/
+log/
+new_aig/
 
 # Compiled Object files
 *.slo
@@ -32,4 +35,5 @@ aiger/
 *.exe
 *.out
 *.app
-aiger_cec
+cec_icond
+cec_ocond
