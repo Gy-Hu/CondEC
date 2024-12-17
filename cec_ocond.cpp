@@ -5,11 +5,11 @@
 #include <cassert>
 #include <chrono>
 
-#include "cadical/src/cadical.hpp"
 #include "condec.h"
 
 extern "C" {
 #include "aiger/aiger.h"
+#include "kissat_extras/src/kissat.h"
 }
 
 
@@ -166,7 +166,9 @@ int main(int argc, char ** argv) {
     
 auto clk_start = std::chrono::high_resolution_clock::now();
 
-    CaDiCaL::Solver *solver = new CaDiCaL::Solver;
+    kissat *solver;
+    solver = kissat_init();
+    kissat_set_option(solver, "quiet", 1);  // stop print kissat log
     CondEC condeq_check(model, solver);
     condeq_check.cec_inputs_register();
     condeq_check.cec_condition_register(condition_output);
@@ -181,6 +183,7 @@ auto clk_end = std::chrono::high_resolution_clock::now();
     const char *new_file = "new.aig";
     create_aiger_after_condec(model, condeq_check, new_file); // after condec, we merge condition and output and create new aig
 
+    kissat_release(solver);
     aiger_reset(model);
     return 0;
     

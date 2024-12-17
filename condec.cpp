@@ -133,11 +133,13 @@ bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equival
         auto miter_o = create_satvar();
         create_miter(miter_o, miter_i1, miter_i2, assumption);  // clause OR assumption
         unit(miter_o, assumption);  // clause OR assumption
-        solver_->assume(-assumption);   // make assumption = flase, enable clause of this function
-        solver_ ->limit("decisions", 20000);
-        int res = solver_ -> solve();   // decision_limit 10000?, we hope to balance cec time and merge number
 
-        if(res == CaDiCaL::SATISFIABLE){
+        kissat_assume(solver_, -assumption);    // make assumption = flase, enable clause of this function
+        kissat_set_decision_limit(solver_, 10000);
+        kissat_set_conflict_limit(solver_, 10000);
+        int res = kissat_solve(solver_);   // decision_limit 10000?, we hope to balance cec time and merge number
+
+        if(res == 10){
             // add more sim round and sim data
             cec_sat_num++;
             if (new_input_pattern_vec.empty())
@@ -147,21 +149,21 @@ bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equival
                 auto input_node = lit_node_map[input_lit];
                 auto input_satvar = node_satvar_map[input_node];
 
-                int sat_assignment = solver_ -> val(input_satvar);
+                int sat_assignment = kissat_value(solver_, input_satvar);
                 bool sim_bit = (sat_assignment > 0) ? 1 : 0;
                 new_input_pattern_vec.at(i).push_back(sim_bit);
             }
         }
-        else if(res == CaDiCaL::UNKNOWN){
-            // nothing to do
-            cec_unknow_num++;
-        }
-        else if(res == CaDiCaL::UNSATISFIABLE){
+        else if(res == 20){
             // merge equivalence node
             cec_unsat_num++;
             equivalence_node = other_node;
             unit(assumption);   // make assumption = true, disable clause of this function
             return true;    // merge
+        }
+        else{
+            // nothing to do
+            cec_unknow_num++;
         }
 
         unit(assumption);   // make assumption = true, disable clause of this function
@@ -526,12 +528,12 @@ void CondEC::cec_ands_register(){
     auto lhs_lit  = model_ -> outputs[0].lit;
     auto satvar = get_satvar(lhs_lit);
     unit(satvar);
-    int res = solver_ -> solve();    //return 10 = sat, 20 = unsat, 0 = unknow
+    int res = kissat_solve(solver_);    //return 10 = sat, 20 = unsat, 0 = unknow
     if(res == 10)
         std::cout << "final sat result: SAT" << std::endl;
     else if(res == 20)
         std::cout << "final sat result: UNSAT" << std::endl;
-    else if(res == 0)
+    else
         std::cout << "final sat result: UNKNOW" << std::endl;
     std::cout << "-------------------------------------" << std::endl;
 

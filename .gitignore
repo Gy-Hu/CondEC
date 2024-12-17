@@ -2,7 +2,7 @@
 *.d
 .vscode/*
 aiger/
-cadical/
+kissat_extras/
 log/
 new_aig/
 

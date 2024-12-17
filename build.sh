@@ -3,8 +3,8 @@
 echo "build start"
 
 g++ -g -c condec.cpp -o condec.o
-g++ -g cec_ocond.cpp aiger/aiger.o cadical/build/libcadical.a condec.o -o cec_ocond
-g++ -g cec_icond.cpp aiger/aiger.o cadical/build/libcadical.a condec.o -o cec_icond
+g++ -g cec_ocond.cpp aiger/aiger.o kissat_extras/build/libkissat.a condec.o -o cec_ocond
+g++ -g cec_icond.cpp aiger/aiger.o kissat_extras/build/libkissat.a condec.o -o cec_icond
 
 echo "build finished"
 
