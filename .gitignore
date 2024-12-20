@@ -35,5 +35,5 @@ new_aig/
 *.exe
 *.out
 *.app
-cec_icond
-cec_ocond
+condec_test
+
