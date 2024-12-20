@@ -11,13 +11,11 @@ extern "C" {
 #include "kissat_extras/src/kissat.h"
 }
 
-// #define SIM_PATTERN {0x5555555555555555UL, 0x3333333333333333UL, 0xf0f0faf0faf0f0ffUL, 0xff0aff0aff0affffUL, 0xffff0aa0ffff0f0fUL, 0xffffffffffffffffUL}
-#define SIM_PATTERN {0x40CB51D950C862C9UL, 0xFFFFFFFFFFFFFFFFUL, 0xFFFFFFFFFFFFFFFFUL, 0x1515BF15BF37BE27UL, 0x1515371515BF36AFUL, 0x148D373736AF3627UL, 0x14273715368D3627UL, 0x14AFBF3736AFBEAFUL, 0x14AFBF1536AFBEAFUL, 0x14AFBE2736AF36AFUL, 0x14AF9C27BEAF14AFUL, 0x14AE8D3626AF36AEUL, 0x14AF9DBE048D3627UL, 0x14AF9D148C8CAE27UL, 0x14AF9D148C8D3627UL, 0x14AF9D9C8C273627UL, 0x14279C8C8C8D368DUL, 0x142715148CAE048DUL, 0x14AF9D148C8C0537UL, 0x159D15148C8C0537UL, 0x159D15140405148DUL, 0x151515148D9D3605UL, 0x14059D148DBF9CAFUL, 0x148D15148D9D9CAFUL, 0x148D9D159D9D9D36UL, 0x148D9D9C8D9D9C8CUL, 0x148D379C8DBF9CAEUL, 0x15BF379C8DBF1426UL, 0x14AE05BFBFBE1427UL, 0x14AE05BF9D9D1426UL, 0x14AE05BF9C8D1536UL, 0x148C05BEAF9D1514UL, 0x69F15BF0C3795AE0UL, 0x4B726240C86262C9UL, 0x417373D840C8C863UL, 0x41D8C84063D8C8C9UL, 0x4151D951FA6241D9UL, 0x4150C840C951D8C8UL, 0x4040C8BB72CCAADDUL, 0x41FAC84063726240UL, 0x41FB724173724063UL, 0x417373FAEB5062C8UL, 0x4063FBD9FB517350UL, 0x40C841FAEA404041UL, 0x40C8C8EBFA62C8EBUL, 0x415062EBFBD9FA63UL, 0x4040EBD9737350C8UL, 0x4151517373FAEB51UL, 0x40C8C9726241D973UL, 0x404173504062C972UL, 0x4151726240C8EAC9UL, 0x406263D86262EAC8UL, 0x415040EAEAEB5172UL, 0x40404150EAEAEAC9UL, 0x404173D84150C841UL, 0x4172C95062C8EAC8UL, 0x406240C9D9D8C862UL, 0x40624063D9517263UL, 0x4150C9D9FA40C862UL, 0x41FAC8EBD973D8C8UL, 0x417351D9D8C8EB50UL, 0x40C9FA63FA40EB50UL, 0x41D950C951D840C8UL, 0x415062406241D862UL}
-
 typedef uint64_t inputs_t;
 typedef uint64_t sim_hash_t;
 
-#define SIM_ROUND 1
+#define INITIAL_ROUND 10    // need to more than INITIAL_SIM_ROUND, because not every bit can sat condition
+#define INITIAL_SIM_ROUND 5    // 5 sim data
 
 class CondEC
 {
@@ -32,6 +30,8 @@ private:
     unsigned cec_sat_num;
     unsigned cec_unknow_num;
     unsigned cec_unsat_num;
+
+    std::vector<std::vector<bool>> initial_pattern_vec;
 
     std::vector<std::vector<bool>> new_input_pattern_vec;   // for storage new sim data
     int new_sim_data_num;   // new sim data number
@@ -68,18 +68,11 @@ public:
 
     // node -> sim data vec
     std::map<unsigned, std::vector<uint64_t>>   node_simulation_data_map;   // node -> simulation data vec
+    std::map<unsigned, std::vector<uint64_t>>   node_cond_data_map;
 
-    // sim pattern init hash
-    std::vector<sim_hash_t>             sim_pattern_hash_vec;
 
-    // create one node hash key
-    int create_structural_hash(unsigned rsh0, unsigned rsh1);
-
-    // generate 64 bit random data
+    // generate 64 bit random data for initial sim hash and sim data
     inputs_t get_random_uint64();
-
-    // get inputs sim hash
-    sim_hash_t get_sim_pattern_hash(unsigned index);
 
     // get simulation hash of node
     sim_hash_t get_simulation_hash(unsigned lit);
@@ -93,16 +86,13 @@ public:
     // get the satvar from lit, lit -> node -> satvar
     int get_satvar(unsigned int lit);
 
-    /********************************* main function for condec *****************************************/
-    // cec inputs stage
-    void cec_inputs_register();
-    void cec_inputs_register(std::map<unsigned, uint64_t> input_cond_map);  // for input-condition
 
-    // cec conditional outputs stage
-    void cec_condition_register(unsigned int &condition_output);
+    /*************************** CondEC MAIN FUNCTION ******************************/
+    // create one node hash key
+    int create_structural_hash(unsigned rsh0, unsigned rsh1);
 
-    // cec and-gates stage
-    void cec_ands_register();
+    // for inputs, generate initial 1 sim hash and INITIAL_SIM_ROUND sim pattern that sat condition
+    void generate_initial_sim_hash_data(unsigned condition_lit);
 
     // cec and-gates stage
     bool cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar);
@@ -114,11 +104,24 @@ public:
     void update_all_sim_data(unsigned int lhs_lit_end);
 
 
+    /********************************* API *****************************************/
+    // cec inputs stage
+    void cec_inputs_register();
+
+    // cec conditional outputs stage
+    void cec_condition_register(unsigned int &condition_output);
+
+    // cec and-gates stage
+    void cec_ands_register();
+
+    // cec final solve stage
+    void cec_solve();
+
     CondEC(aiger *model, kissat *solver): model_(model), solver_(solver), node_number(0), structural_hash_merge_num(0), cec_merge_num(0), cec_sat_num(0), cec_unknow_num(0), cec_unsat_num(0),
-                new_sim_data_num(0), sim_pattern_hash_vec(SIM_PATTERN), solver_satvar(0){};
+                initial_pattern_vec(0), new_input_pattern_vec(0), new_sim_data_num(0), solver_satvar(0){};
 
 
-    // kissat
+    /********************************* KISSAT SOLVER *******************************/
     void inline unit(int a)
     {   
         kissat_add(solver_, a);

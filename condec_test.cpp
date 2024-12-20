@@ -148,17 +148,15 @@ int main(int argc, char ** argv) {
     std::cout << "Max Depth of output: " << max_depth << std::endl;
 
     // merge 2 condition outputs to 1 condition output 
-    aiger_add_and(model, aiger_var2lit(model->maxvar + 1), model -> outputs[1].lit, model -> outputs[2].lit);
-    model->num_outputs = 2;
-    model->outputs[1].lit = aiger_var2lit(model->maxvar);
-    aiger_reencode(model);
-
-    // create output+condition aig
-        // FILE *output2_aig = fopen ("output2_aig", "w");
-        // aiger_write_to_file(model, aiger_binary_mode, output2_aig);
-        // use aigsplit to get cond.aig
-        // use abc to transfer cond.aig to cond.cnf
-        // use cryptominisat to sat cond.cnf for getting initial sim hash and sim data
+    auto output_num = model->num_outputs;
+    while (model->num_outputs > 2)
+    {
+        int i = 2;
+        aiger_add_and(model, aiger_var2lit(model->maxvar + 1), model -> outputs[1].lit, model -> outputs[i].lit);
+        model->num_outputs = output_num - 1;
+        model->outputs[1].lit = aiger_var2lit(model->maxvar);
+        aiger_reencode(model);
+    }
 
     // conditonal equivalence checking
     unsigned int miter_output = model -> outputs[0].lit;
@@ -169,10 +167,12 @@ auto clk_start = std::chrono::high_resolution_clock::now();
     kissat *solver;
     solver = kissat_init();
     kissat_set_option(solver, "quiet", 1);  // stop print kissat log
+    
     CondEC condeq_check(model, solver);
     condeq_check.cec_inputs_register();
     condeq_check.cec_condition_register(condition_output);
     condeq_check.cec_ands_register();
+    condeq_check.cec_solve();
 
 auto clk_end = std::chrono::high_resolution_clock::now();
 
