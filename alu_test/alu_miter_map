@@ -12,13 +12,5 @@ input 10 0 control
 input 11 1 control
 input 12 2 control
 input 13 3 control
-output 0 0 out
-output 1 1 out
-output 2 2 out
-output 3 3 out
-output 4 4 out
-output 5 5 out
-output 6 6 out
-output 7 7 out
-output 8 8 out
-output 9 9 out
+output 0 0 result
+output 1 0 condition

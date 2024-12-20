@@ -3,6 +3,7 @@
 #include <map>
 #include <stack>
 #include <random>
+#include <cassert>
 
 #include "condec.h"
 
@@ -40,22 +41,6 @@ inputs_t CondEC::get_random_uint64()
     return random_value;
 }
 
-sim_hash_t CondEC::get_sim_pattern_hash(unsigned index){
-    if (index < sim_pattern_hash_vec.size())
-        return sim_pattern_hash_vec.at(index);
-    sim_hash_t ret = 0;
-    
-    for (unsigned bit = 0, mask = 1; bit < sim_pattern_hash_vec.size(); ++bit, mask <<= 1){
-        auto exbit = index & mask; // you do need to shift right actually
-        if (exbit)
-          ret = ret ^ sim_pattern_hash_vec.at(bit);
-      }
-    if (ret == 0)
-        ret = get_random_uint64();
-
-    return ret;
-}
-
 //  get simulation hash or ~hash
 sim_hash_t CondEC::get_simulation_hash(unsigned lit){
     bool neg = aiger_sign(lit);
@@ -78,6 +63,92 @@ int CondEC::get_satvar(unsigned int lit){
     auto satvar = aiger_sign(lit) ?  -node_satvar_map[node] : node_satvar_map[node];
     return satvar;
 }
+
+void CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
+    int initial_sim_round = 0;
+    initial_pattern_vec.resize(model_->num_inputs);
+    while(initial_pattern_vec.at(0).size() <= (INITIAL_SIM_ROUND+1) * 64){  // we need to generate 1 group sim hash and 5 group sim data, (1+5)*64 bit
+        // random input data
+        for(int i = 0; i < model_ -> num_inputs; i ++){
+            auto input_lit = model_ -> inputs[i].lit;
+            auto input_node = lit_node_map[input_lit];
+            for(int round = 0; round < INITIAL_ROUND; round++){
+                auto sim_data = get_random_uint64();
+                node_cond_data_map[input_node].push_back(sim_data);
+            }
+        }
+
+        // simulation
+        for(int i = 0; i < model_->num_ands; i++){
+            auto rhs0_lit = model_ -> ands[i].rhs0;
+            auto rhs1_lit = model_ -> ands[i].rhs1;
+            auto lhs_lit  = model_ -> ands[i].lhs;
+
+            if(lit_node_map.find(lhs_lit) == lit_node_map.end()){
+                // this lit is not in condition
+                continue;
+            }
+                // this lit is in condition
+            auto rhs0_node = lit_node_map[aiger_strip(rhs0_lit)];
+            auto rhs1_node = lit_node_map[aiger_strip(rhs1_lit)];
+            auto lhs_node = lit_node_map[aiger_strip(lhs_lit)];
+
+            for(int cond_sim_round = initial_sim_round; cond_sim_round < initial_sim_round + INITIAL_ROUND; cond_sim_round++){
+                auto rhs0_sim_data = aiger_sign(rhs0_lit) ? ~node_cond_data_map[rhs0_node].at(cond_sim_round) : node_cond_data_map[rhs0_node].at(cond_sim_round);
+                auto rhs1_sim_data = aiger_sign(rhs1_lit) ? ~node_cond_data_map[rhs1_node].at(cond_sim_round) : node_cond_data_map[rhs1_node].at(cond_sim_round);
+                auto lhs_sim_data = rhs0_sim_data & rhs1_sim_data;
+                node_cond_data_map[lhs_node].push_back(lhs_sim_data);
+            }
+        }
+
+        // get the sat solutions
+        auto condition_node = lit_node_map[aiger_strip(condition_lit)];
+        for(int cond_sim_round = initial_sim_round; cond_sim_round < initial_sim_round + INITIAL_ROUND; cond_sim_round++){
+            auto condition_sim_data = aiger_sign(condition_lit) ?  ~node_cond_data_map[condition_node].at(cond_sim_round) : node_cond_data_map[condition_node].at(cond_sim_round);
+            for (int i = 0; i < 64; ++i) {
+                if (condition_sim_data & (1ULL << i)) { // if sim data bit == 1
+                    for(int j = 0; j < model_ -> num_inputs; j ++){
+                        auto input_lit = model_ -> inputs[j].lit;
+                        auto input_node = lit_node_map[input_lit];
+                        auto input_bit = node_cond_data_map[input_node].at(cond_sim_round) & (1ULL << i);
+                        initial_pattern_vec.at(j).push_back(input_bit);
+                    }
+                }
+            }
+        }
+
+        std::cout << "we already generate useful initial pattern size: " << initial_pattern_vec.at(0).size() << std::endl;
+        initial_sim_round = initial_sim_round + INITIAL_ROUND;
+    }
+    
+    // transfer initial_pattern_vec to node_simulation_data_map
+    uint64_t sim_hash;
+    uint64_t sim_data;
+    for(int i = 0; i < model_ -> num_inputs; i ++){
+        int initial_sim_num = 0;
+        auto input_node = lit_node_map[model_->inputs[i].lit];
+
+        for(int pattern_round = 0; pattern_round < 64; pattern_round++){
+            sim_hash <<= 1;
+            sim_hash |= (initial_pattern_vec.at(i).at(pattern_round) ? 1 : 0);
+        }
+        node_simulation_hash_map[input_node] = sim_hash;
+
+        for(int pattern_round = 64; pattern_round < (INITIAL_SIM_ROUND+1) * 64; pattern_round++){
+            sim_data <<= 1;
+            sim_data |= (initial_pattern_vec.at(i).at(pattern_round) ? 1 : 0);
+            initial_sim_num++;
+            if(initial_sim_num == 64){
+                auto input_node = lit_node_map[model_->inputs[i].lit];
+                node_simulation_data_map[input_node].push_back(sim_data);
+                initial_sim_num = 0;
+            }
+        }
+        
+        assert(node_simulation_data_map[input_node].size() == INITIAL_SIM_ROUND);
+    }
+}
+
 
 // after cec_checker if have 64 sat solutions, create a new sim data for input
 void CondEC::create_new_simulation_data(){
@@ -108,12 +179,12 @@ void CondEC::update_all_sim_data(unsigned int lhs_lit_end){
         auto rhs1_lit = model_ -> ands[i].rhs1;
         auto lhs_lit  = model_ -> ands[i].lhs;
 
-        auto rhs0_sim_data = get_simulation_data(rhs0_lit, SIM_ROUND + new_sim_data_num - 1);
-        auto rhs1_sim_data = get_simulation_data(rhs1_lit, SIM_ROUND + new_sim_data_num - 1);
+        auto rhs0_sim_data = get_simulation_data(rhs0_lit, INITIAL_SIM_ROUND + new_sim_data_num - 1);
+        auto rhs1_sim_data = get_simulation_data(rhs1_lit, INITIAL_SIM_ROUND + new_sim_data_num - 1);
         auto sim_data = rhs0_sim_data & rhs1_sim_data;
 
         auto and_node = lit_node_map[lhs_lit];
-        if(node_simulation_data_map[and_node].size() == SIM_ROUND + new_sim_data_num - 1){
+        if(node_simulation_data_map[and_node].size() == INITIAL_SIM_ROUND + new_sim_data_num - 1){
             node_simulation_data_map[and_node].push_back(sim_data);
         }
         
@@ -188,77 +259,7 @@ void CondEC::cec_inputs_register(){
         node_satvar_map[input_node] = satvar;
 
         // structral hash -> node
-        // structural_hash_nodevec_map[input_lit].push_back(input_node);
         structural_hash_nodevec_map[input_node].push_back(input_node);
-
-        // node <-> sim hash
-        auto sim_hash = get_sim_pattern_hash(i);
-        node_simulation_hash_map[input_node] = sim_hash;
-        simulation_hash_nodevec_map[sim_hash].push_back(input_node);
-        std::cout << "input lit: " << input_lit << " <-> node: " << input_node << " <-> satvar: " << satvar << std::endl;
-        std::cout << "input node " << input_node << " simulation hash: " << node_simulation_hash_map[input_node] << std::endl;
-
-        // node -> sim data
-        // for(int sim_round = 0; sim_round < SIM_ROUND; sim_round++){
-        //     node_simulation_data_map[input_node].push_back(get_random_uint64());    // bug!!! reason: random sim data not sat condition
-        //     std::cout << "sim round " << sim_round << ", simulation data: " << node_simulation_data_map[input_node].at(sim_round) << std::endl;
-        // }
-
-        // for test
-        node_simulation_data_map[input_node].push_back(sim_hash);   // just 1 sim round
-
-        std::cout << "----------------------------------------------------------------------------------------" << std::endl;
-    }
-}
-
-void CondEC::cec_inputs_register(std::map<unsigned, uint64_t> input_cond_map){
-    for(int i = 0; i < model_ -> num_inputs; i ++){
-        std::cout << "cec_inputs_register (" << (i+1) << "/" << model_->num_inputs << ")" << std::endl;
-        // get the lit from aiger model
-        auto input_lit = model_ -> inputs[i].lit;
-
-        // lit <-> node
-        auto input_node = create_new_node();
-        lit_node_map[input_lit] = input_node;
-        node_lit_map[input_node] = input_lit;
-        
-        // node -> sat var
-        auto satvar = create_satvar();
-        node_satvar_map[input_node] = satvar;
-
-        // structral hash -> node
-        // structural_hash_nodevec_map[input_lit].push_back(input_node);
-        structural_hash_nodevec_map[input_node].push_back(input_node);
-
-        // node <-> sim hash
-        // if input have input-condition
-        bool cond_enable = false;
-        uint64_t cond_input_data;
-        if(input_cond_map.find(i) != input_cond_map.end()){ 
-            cond_enable = true;
-            cond_input_data = input_cond_map[i];
-            if(cond_input_data == 0x0000000000000000UL)
-                unit(-satvar);
-            else if(cond_input_data == 0xffffffffffffffffUL)
-                unit(satvar);
-        }
-
-        auto sim_hash = cond_enable ? cond_input_data : get_sim_pattern_hash(i);
-        node_simulation_hash_map[input_node] = sim_hash;
-        simulation_hash_nodevec_map[sim_hash].push_back(input_node);
-        std::cout << "input lit: " << input_lit << " <-> node: " << input_node << " <-> satvar: " << satvar << std::endl;
-        std::cout << "input node " << input_node << " simulation hash: " << node_simulation_hash_map[input_node] << std::endl;
-
-        // node -> sim data
-        // for(int sim_round = 0; sim_round < SIM_ROUND; sim_round++){
-        //     node_simulation_data_map[input_node].push_back(get_random_uint64());    // bug!!! reason: random sim data not sat condition
-        //     std::cout << "sim round " << sim_round << ", simulation data: " << node_simulation_data_map[input_node].at(sim_round) << std::endl;
-        // }
-
-        // for test
-        node_simulation_data_map[input_node].push_back(sim_hash);   // just 1 sim round
-
-        std::cout << "----------------------------------------------------------------------------------------" << std::endl;
     }
 }
 
@@ -328,6 +329,8 @@ void CondEC::cec_condition_register(unsigned int &condition_output){
     unit(condition_satvar);
 
     std::cout << "total create condition node number: " << condition_node_number << std::endl;
+    
+    generate_initial_sim_hash_data(condition_lit);
 }
 
 void CondEC::cec_ands_register(){
@@ -392,7 +395,7 @@ void CondEC::cec_ands_register(){
 
         // sim data
         std::vector<inputs_t> lhs_sim_data;
-        for(int sim_round = 0; sim_round < (SIM_ROUND + new_sim_data_num); sim_round++){
+        for(int sim_round = 0; sim_round < (INITIAL_SIM_ROUND + new_sim_data_num); sim_round++){
             auto rhs0_sim_data = get_simulation_data(rhs0_lit, sim_round);
             auto rhs1_sim_data = get_simulation_data(rhs1_lit, sim_round);
             auto sim_data = rhs0_sim_data & rhs1_sim_data;
@@ -513,22 +516,25 @@ void CondEC::cec_ands_register(){
         std::cout << "-------------------------------------" << std::endl;
     }   // end of for and-gates
 
+}
 
-    // print infomation about cec
+void CondEC::cec_solve(){
+    // print information about cec
     std::cout << "----------------FINAL----------------" << std::endl;
     std::cout << "sat              number: " << cec_sat_num << std::endl;
     std::cout << "unknow           number: " << cec_unknow_num << std::endl;
     std::cout << "unsat            number: " << cec_unsat_num << std::endl;
     std::cout << "structural merge number: " << structural_hash_merge_num << std::endl;
     std::cout << "cec merge        number: " << cec_merge_num << std::endl;
-    std::cout << "new sim pattern  number: " << new_input_pattern_vec.at(0).size() << std::endl;
+    std::cout << "new sim pattern  number: " << new_sim_data_num << std::endl;
     std::cout << "-------------------------------------" << std::endl;
 
-    // final sat for output
+    // final sat result for output
     auto lhs_lit  = model_ -> outputs[0].lit;
     auto satvar = get_satvar(lhs_lit);
     unit(satvar);
     int res = kissat_solve(solver_);    //return 10 = sat, 20 = unsat, 0 = unknow
+    
     if(res == 10)
         std::cout << "final sat result: SAT" << std::endl;
     else if(res == 20)
@@ -538,5 +544,4 @@ void CondEC::cec_ands_register(){
     std::cout << "-------------------------------------" << std::endl;
 
 }
-
 

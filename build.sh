@@ -3,8 +3,9 @@
 echo "build start"
 
 g++ -g -c condec.cpp -o condec.o
-g++ -g cec_ocond.cpp aiger/aiger.o kissat_extras/build/libkissat.a condec.o -o cec_ocond
-g++ -g cec_icond.cpp aiger/aiger.o kissat_extras/build/libkissat.a condec.o -o cec_icond
+echo "build condec.o"
+g++ -g condec_test.cpp aiger/aiger.o kissat_extras/build/libkissat.a condec.o -o condec_test
+echo "build condec_test"
 
 echo "build finished"
 
