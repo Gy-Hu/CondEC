@@ -15,7 +15,7 @@ typedef uint64_t inputs_t;
 typedef uint64_t sim_hash_t;
 
 #define INITIAL_ROUND 10    // need to more than INITIAL_SIM_ROUND, because not every bit can sat condition
-#define INITIAL_SIM_ROUND 5    // 5 sim data
+#define INITIAL_SIM_ROUND 3    // 5 sim data
 
 class CondEC
 {
@@ -62,7 +62,7 @@ public:
     // std::map<unsigned, int>                     node_structural_hash_map;
     std::map<int, std::vector<unsigned>>        structural_hash_nodevec_map;
 
-    // node <-> structural data
+    // node <-> sim hash
     std::map<unsigned, uint64_t>                node_simulation_hash_map;
     std::map<uint64_t, std::vector<unsigned>>   simulation_hash_nodevec_map;
 
@@ -92,7 +92,7 @@ public:
     int create_structural_hash(unsigned rsh0, unsigned rsh1);
 
     // for inputs, generate initial 1 sim hash and INITIAL_SIM_ROUND sim pattern that sat condition
-    void generate_initial_sim_hash_data(unsigned condition_lit);
+    bool generate_initial_sim_hash_data(unsigned condition_lit);
 
     // cec and-gates stage
     bool cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar);

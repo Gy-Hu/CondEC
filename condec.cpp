@@ -4,6 +4,8 @@
 #include <stack>
 #include <random>
 #include <cassert>
+#include <chrono>
+#include <algorithm>
 
 #include "condec.h"
 
@@ -64,7 +66,7 @@ int CondEC::get_satvar(unsigned int lit){
     return satvar;
 }
 
-void CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
+bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
     int initial_sim_round = 0;
     initial_pattern_vec.resize(model_->num_inputs);
     while(initial_pattern_vec.at(0).size() <= (INITIAL_SIM_ROUND+1) * 64){  // we need to generate 1 group sim hash and 5 group sim data, (1+5)*64 bit
@@ -119,6 +121,10 @@ void CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
 
         std::cout << "we already generate useful initial pattern size: " << initial_pattern_vec.at(0).size() << std::endl;
         initial_sim_round = initial_sim_round + INITIAL_ROUND;
+
+        if(initial_pattern_vec.at(0).size() <= 64){
+            return true;
+        }
     }
     
     // transfer initial_pattern_vec to node_simulation_data_map
@@ -147,6 +153,8 @@ void CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
         
         assert(node_simulation_data_map[input_node].size() == INITIAL_SIM_ROUND);
     }
+
+    return false;
 }
 
 
@@ -330,7 +338,31 @@ void CondEC::cec_condition_register(unsigned int &condition_output){
 
     std::cout << "total create condition node number: " << condition_node_number << std::endl;
     
-    generate_initial_sim_hash_data(condition_lit);
+    auto enable = generate_initial_sim_hash_data(condition_lit);
+
+    if(enable){
+        std::cout << "dont generate condition sim data, so we set default data" << std::endl;
+        for(int i = 0; i < model_ -> num_inputs; i ++){
+        // get the lit from aiger model
+        auto input_lit = model_ -> inputs[i].lit;
+
+        // lit <-> node
+        auto input_node = lit_node_map[input_lit];
+
+        // sim hash
+        auto sim_hash = get_random_uint64();
+        node_simulation_hash_map[input_node] = sim_hash;
+
+        auto sim_data = sim_hash;
+        // sim data
+        for(int sim_round = 0; sim_round < INITIAL_SIM_ROUND; sim_round++){
+            // auto sim_data = get_random_uint64();
+            node_simulation_data_map[input_node].push_back(sim_data);
+        }
+        
+        }
+    }
+    
 }
 
 void CondEC::cec_ands_register(){
@@ -362,6 +394,9 @@ void CondEC::cec_ands_register(){
         if(structural_hash_nodevec_map.find(structral_hash) != structural_hash_nodevec_map.end()){  // check if same structural hash
             for(auto &other_node : structural_hash_nodevec_map[structral_hash]){
                 auto other_lit = node_lit_map[other_node];
+                // if(aiger_lit2var(other_lit) <= model_->num_inputs){
+                //     continue;
+                // }
                 aiger_and *other_and_gate = aiger_is_and(model_, other_lit);
 
                 auto other_id1 = lit_node_map[aiger_strip(other_and_gate->rhs0)];

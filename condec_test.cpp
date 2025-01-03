@@ -122,14 +122,21 @@ int main(int argc, char ** argv) {
     int i, j;
 
     name = argv[1];
+    std::string quiet;
+    if(argc >= 3){
+        quiet = argv[2];
+        if(quiet == "-q")
+            std::cout.setstate(std::ios::failbit);
+    }
     if (name) err = aiger_open_and_read_from_file (model, name);
 
-    printf ("MILOA = %u %u %u %u %u\n",
-       model->maxvar,
-       model->num_inputs,
-       model->num_latches,
-       model->num_outputs,
-       model->num_ands);
+    std::cout << "maxvar = " << model->maxvar << std::endl;
+    std::cout << "inputs = " << model->num_inputs << std::endl;
+    std::cout << "latches = " << model->num_latches << std::endl;
+    std::cout << "outputs = " << model->num_outputs << std::endl;
+    std::cout << "ands = " << model->num_ands << std::endl;
+    std::cout << "bad = " << model->num_bad << std::endl;
+    std::cout << "constraints = " << model->num_constraints << std::endl;
 
     // find which is output, which is conditon，by computing depth of outputs
     std::map<int, int> depth_map;
@@ -147,14 +154,21 @@ int main(int argc, char ** argv) {
     }
     std::cout << "Max Depth of output: " << max_depth << std::endl;
 
-    // merge 2 condition outputs to 1 condition output 
-    auto output_num = model->num_outputs;
-    while (model->num_outputs > 2)
-    {
-        int i = 2;
-        aiger_add_and(model, aiger_var2lit(model->maxvar + 1), model -> outputs[1].lit, model -> outputs[i].lit);
-        model->num_outputs = output_num - 1;
-        model->outputs[1].lit = aiger_var2lit(model->maxvar);
+    std::vector<int> condition_vec;
+    for(int i = 0; i < model -> num_outputs; i ++){
+        auto output_lit = model -> outputs[i].lit;
+        if(output_lit <= aiger_var2lit(model->num_inputs) + 1){
+            condition_vec.push_back(output_lit);
+        }
+    }
+
+    // merge 2 condition outputs to 1 condition output
+    if( model->num_outputs > 2){
+        for(int i = 2; i < model->num_outputs; i++){
+            aiger_add_and(model, aiger_var2lit(model->maxvar + 1), model -> outputs[1].lit, model -> outputs[i].lit);
+            model->outputs[1].lit = aiger_var2lit(model->maxvar);
+        }
+        model->num_outputs = 2;
         aiger_reencode(model);
     }
 
@@ -170,6 +184,12 @@ auto clk_start = std::chrono::high_resolution_clock::now();
     
     CondEC condeq_check(model, solver);
     condeq_check.cec_inputs_register();
+    // if have input condition, add clause to solver, it will sat better
+    for(auto item : condition_vec){
+        auto node = condeq_check.lit_node_map[item];
+        auto satvar = aiger_sign(item) ? -condeq_check.node_satvar_map[node] : condeq_check.node_satvar_map[node];
+        condeq_check.unit(satvar);
+    }
     condeq_check.cec_condition_register(condition_output);
     condeq_check.cec_ands_register();
     condeq_check.cec_solve();
@@ -177,11 +197,8 @@ auto clk_start = std::chrono::high_resolution_clock::now();
 auto clk_end = std::chrono::high_resolution_clock::now();
 
     std::chrono::duration<double> cec_time = clk_end - clk_start;
+    std::cout.clear();
     std::cout << "conditional equilvalence time: " << cec_time.count() << " seconds\n";
-
-    // const char *new_file = argv[2];
-    const char *new_file = "new.aig";
-    create_aiger_after_condec(model, condeq_check, new_file); // after condec, we merge condition and output and create new aig
 
     kissat_release(solver);
     aiger_reset(model);
