@@ -121,14 +121,33 @@ int main(int argc, char ** argv) {
     const char * err;
     int i, j;
 
-    name = argv[1];
-    std::string quiet;
-    if(argc >= 3){
-        quiet = argv[2];
-        if(quiet == "-q")
-            std::cout.setstate(std::ios::failbit);
+    if(argc == 1){
+        std::cout << "[Usage] " << argv[0] << " <aigfile> [-option]" << std::endl;
+        return 1;
     }
+    for(int i = 1; i < argc; i++){
+        std::string var = argv[i];
+        if(var == "-q"){
+            std::cout.setstate(std::ios::failbit);
+        }
+        else if(var == "-h"){
+            std::cout << "[Usage] " << argv[0] << " <aigfile> [-option]" << std::endl;
+            std::cout << "common options: " << std::endl;
+            std::cout << "       -h     print this list of common command line options" << std::endl;
+            std::cout << "       -q     be quiet, only print check time" << std::endl;
+            return 1;
+        }
+        else
+            name = argv[i];
+    }
+
     if (name) err = aiger_open_and_read_from_file (model, name);
+    if (err) {std::cout << "[Error] " << err << std::endl; return 1;}
+
+    if(model->num_outputs <= 1){
+        std::cout << "[Error] Minimum 2 outputs required." << std::endl;
+        return 1;
+    }
 
     std::cout << "maxvar = " << model->maxvar << std::endl;
     std::cout << "inputs = " << model->num_inputs << std::endl;
@@ -154,12 +173,10 @@ int main(int argc, char ** argv) {
     }
     std::cout << "Max Depth of output: " << max_depth << std::endl;
 
+    // get all condition lit
     std::vector<int> condition_vec;
-    for(int i = 0; i < model -> num_outputs; i ++){
-        auto output_lit = model -> outputs[i].lit;
-        if(output_lit <= aiger_var2lit(model->num_inputs) + 1){
-            condition_vec.push_back(output_lit);
-        }
+    for(int i = 1; i < model -> num_outputs; i ++){
+        condition_vec.push_back(model->outputs[i].lit);
     }
 
     // merge 2 condition outputs to 1 condition output
@@ -184,13 +201,13 @@ auto clk_start = std::chrono::high_resolution_clock::now();
     
     CondEC condeq_check(model, solver);
     condeq_check.cec_inputs_register();
-    // if have input condition, add clause to solver, it will sat better
-    for(auto item : condition_vec){
-        auto node = condeq_check.lit_node_map[item];
-        auto satvar = aiger_sign(item) ? -condeq_check.node_satvar_map[node] : condeq_check.node_satvar_map[node];
-        condeq_check.unit(satvar);
-    }
     condeq_check.cec_condition_register(condition_output);
+    // add all conditions separately to the solver, it will sat faster
+    for(auto &cond_output : condition_vec){
+        auto cond_node = condeq_check.lit_node_map[aiger_strip(cond_output)];
+        auto cond_satvar = aiger_sign(cond_output) ? -condeq_check.node_satvar_map[cond_node] : condeq_check.node_satvar_map[cond_node];
+        condeq_check.unit(cond_satvar);
+    }
     condeq_check.cec_ands_register();
     condeq_check.cec_solve();
 

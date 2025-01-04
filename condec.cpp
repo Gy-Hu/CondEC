@@ -394,9 +394,9 @@ void CondEC::cec_ands_register(){
         if(structural_hash_nodevec_map.find(structral_hash) != structural_hash_nodevec_map.end()){  // check if same structural hash
             for(auto &other_node : structural_hash_nodevec_map[structral_hash]){
                 auto other_lit = node_lit_map[other_node];
-                // if(aiger_lit2var(other_lit) <= model_->num_inputs){
-                //     continue;
-                // }
+                if(aiger_lit2var(other_lit) <= model_->num_inputs){
+                    continue;
+                }
                 aiger_and *other_and_gate = aiger_is_and(model_, other_lit);
 
                 auto other_id1 = lit_node_map[aiger_strip(other_and_gate->rhs0)];
