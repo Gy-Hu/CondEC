@@ -48,69 +48,69 @@ int compute_depth(unsigned lit, aiger *model, std::map<int, int> &depth_map) {
     return depth;
 }
 
-void create_aiger_after_condec(aiger * model, CondEC &condeq_check, const char *new_file){  // for conditional cec create new aig
-    aiger * new_model;
-    new_model = aiger_init();
-    std::map<unsigned, unsigned> node_var_map;
+// void create_aiger_after_condec(aiger * model, CondEC &condeq_check, const char *new_file){  // for conditional cec create new aig
+//     aiger * new_model;
+//     new_model = aiger_init();
+//     std::map<unsigned, unsigned> node_var_map;
 
-    for(int i = 0; i < model -> num_inputs; i ++){
-        auto input_lit = model->inputs[i].lit;
-        auto input_node = condeq_check.lit_node_map[input_lit];
-        aiger_add_input(new_model, aiger_var2lit(input_node), 0);
+//     for(int i = 0; i < model -> num_inputs; i ++){
+//         auto input_lit = model->inputs[i].lit;
+//         auto input_node = condeq_check.lit_node_map[input_lit];
+//         aiger_add_input(new_model, aiger_var2lit(input_node), 0);
 
-        node_var_map[input_node] = new_model->maxvar;
-    }
-    for(int i = 0; i < model -> num_ands; i ++){
-        auto rhs0_lit = model -> ands[i].rhs0;
-        auto rhs1_lit = model -> ands[i].rhs1;
-        auto lhs_lit  = model -> ands[i].lhs;
+//         node_var_map[input_node] = new_model->maxvar;
+//     }
+//     for(int i = 0; i < model -> num_ands; i ++){
+//         auto rhs0_lit = model -> ands[i].rhs0;
+//         auto rhs1_lit = model -> ands[i].rhs1;
+//         auto lhs_lit  = model -> ands[i].lhs;
 
-        auto rhs0_node = condeq_check.lit_node_map[aiger_strip(rhs0_lit)];
-        auto rhs1_node = condeq_check.lit_node_map[aiger_strip(rhs1_lit)];
-        auto lhs_node  = condeq_check.lit_node_map[lhs_lit];
+//         auto rhs0_node = condeq_check.lit_node_map[aiger_strip(rhs0_lit)];
+//         auto rhs1_node = condeq_check.lit_node_map[aiger_strip(rhs1_lit)];
+//         auto lhs_node  = condeq_check.lit_node_map[lhs_lit];
         
-        if(node_var_map.find(lhs_node) != node_var_map.end()){
-            continue;
-        }
-        auto maxvar = (new_model -> maxvar) + 1;
+//         if(node_var_map.find(lhs_node) != node_var_map.end()){
+//             continue;
+//         }
+//         auto maxvar = (new_model -> maxvar) + 1;
 
-        auto rhs0_new_lit = aiger_sign(rhs0_lit) ? aiger_var2lit(node_var_map[rhs0_node])+1 : aiger_var2lit(node_var_map[rhs0_node]);
-        auto rhs1_new_lit = aiger_sign(rhs1_lit) ? aiger_var2lit(node_var_map[rhs1_node])+1 : aiger_var2lit(node_var_map[rhs1_node]);
-        auto lhs_new_lit = aiger_var2lit(maxvar);
+//         auto rhs0_new_lit = aiger_sign(rhs0_lit) ? aiger_var2lit(node_var_map[rhs0_node])+1 : aiger_var2lit(node_var_map[rhs0_node]);
+//         auto rhs1_new_lit = aiger_sign(rhs1_lit) ? aiger_var2lit(node_var_map[rhs1_node])+1 : aiger_var2lit(node_var_map[rhs1_node]);
+//         auto lhs_new_lit = aiger_var2lit(maxvar);
 
-        aiger_add_and(new_model, lhs_new_lit, rhs0_new_lit, rhs1_new_lit);
-        node_var_map[lhs_node] = new_model->maxvar;
-    }
-    for(int i = 0; i < model -> num_outputs; i ++){
-        auto output_lit = model->outputs[i].lit;
-        auto output_node = condeq_check.lit_node_map[aiger_strip(output_lit)];
-        auto output_new_lit = aiger_sign(output_lit) ? aiger_var2lit(node_var_map[output_node])+1 : aiger_var2lit(node_var_map[output_node]);
+//         aiger_add_and(new_model, lhs_new_lit, rhs0_new_lit, rhs1_new_lit);
+//         node_var_map[lhs_node] = new_model->maxvar;
+//     }
+//     for(int i = 0; i < model -> num_outputs; i ++){
+//         auto output_lit = model->outputs[i].lit;
+//         auto output_node = condeq_check.lit_node_map[aiger_strip(output_lit)];
+//         auto output_new_lit = aiger_sign(output_lit) ? aiger_var2lit(node_var_map[output_node])+1 : aiger_var2lit(node_var_map[output_node]);
 
-        aiger_add_output(new_model, output_new_lit, 0);
-    }
+//         aiger_add_output(new_model, output_new_lit, 0);
+//     }
 
-    std::cout << "new aiger model MIOA:" << std::endl;
-    std::cout << "M: " << new_model -> maxvar << std::endl;
-    std::cout << "I: " << new_model -> num_inputs << std::endl;
-    std::cout << "0: " << new_model -> num_outputs << std::endl;
-    std::cout << "A: " << new_model -> num_ands << std::endl;
+//     std::cout << "new aiger model MIOA:" << std::endl;
+//     std::cout << "M: " << new_model -> maxvar << std::endl;
+//     std::cout << "I: " << new_model -> num_inputs << std::endl;
+//     std::cout << "0: " << new_model -> num_outputs << std::endl;
+//     std::cout << "A: " << new_model -> num_ands << std::endl;
 
-    // merge 2 output
-    aiger_add_and(new_model, aiger_var2lit(new_model->maxvar + 1), new_model -> outputs[0].lit, new_model -> outputs[1].lit);
-    new_model->num_outputs = 1;
-    new_model->outputs[0].lit = aiger_var2lit(new_model->maxvar);
+//     // merge 2 output
+//     aiger_add_and(new_model, aiger_var2lit(new_model->maxvar + 1), new_model -> outputs[0].lit, new_model -> outputs[1].lit);
+//     new_model->num_outputs = 1;
+//     new_model->outputs[0].lit = aiger_var2lit(new_model->maxvar);
 
-    FILE *new_aig_merge = fopen (new_file, "w");
-    aiger_write_to_file(new_model, aiger_binary_mode, new_aig_merge);    // triggers 'aig_reencode'
+//     FILE *new_aig_merge = fopen (new_file, "w");
+//     aiger_write_to_file(new_model, aiger_binary_mode, new_aig_merge);    // triggers 'aig_reencode'
 
-    std::cout << "after reencode new aiger model MIOA:" << std::endl;
-    std::cout << "M: " << new_model -> maxvar << std::endl;
-    std::cout << "I: " << new_model -> num_inputs << std::endl;
-    std::cout << "0: " << new_model -> num_outputs << std::endl;
-    std::cout << "A: " << new_model -> num_ands << std::endl;
+//     std::cout << "after reencode new aiger model MIOA:" << std::endl;
+//     std::cout << "M: " << new_model -> maxvar << std::endl;
+//     std::cout << "I: " << new_model -> num_inputs << std::endl;
+//     std::cout << "0: " << new_model -> num_outputs << std::endl;
+//     std::cout << "A: " << new_model -> num_ands << std::endl;
 
-    aiger_reset(new_model);
-}
+//     aiger_reset(new_model);
+// }
 
 int main(int argc, char ** argv) {
 
@@ -201,12 +201,15 @@ auto clk_start = std::chrono::high_resolution_clock::now();
     
     CondEC condeq_check(model, solver);
     condeq_check.cec_inputs_register();
-    condeq_check.cec_condition_register(condition_output);
+    condeq_check.cec_condition_register(condition_output, condition_vec);
     // add all conditions separately to the solver, it will sat faster
-    for(auto &cond_output : condition_vec){
-        auto cond_node = condeq_check.lit_node_map[aiger_strip(cond_output)];
-        auto cond_satvar = aiger_sign(cond_output) ? -condeq_check.node_satvar_map[cond_node] : condeq_check.node_satvar_map[cond_node];
-        condeq_check.unit(cond_satvar);
+    if(condition_vec.size() > 10){
+        for(auto &cond_output : condition_vec){
+            auto cond_node = condeq_check.lit_node_map[aiger_strip(cond_output)];
+            auto cond_satvar = aiger_sign(cond_output) ? -condeq_check.node_satvar_map[cond_node.node] : condeq_check.node_satvar_map[cond_node.node];
+            cond_satvar = cond_node.neg ? ~cond_satvar : cond_satvar;
+            condeq_check.unit(cond_satvar);
+        }
     }
     condeq_check.cec_ands_register();
     condeq_check.cec_solve();

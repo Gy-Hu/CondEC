@@ -22,10 +22,12 @@ int CondEC::create_structural_hash(unsigned rsh0, unsigned rsh1){
 
     bool c1 = aiger_sign(rsh0); // true = neg, false = pos
     bool c2 = aiger_sign(rsh1); // true = neg, false = pos
+    c1 = id1.neg ? !c1 : c1;
+    c2 = id2.neg ? !c2 : c2;
 
     unsigned hash = 0;
-    hash += id1 * 7937;
-    hash += id2 * 2971;
+    hash += id1.node * 7937;
+    hash += id2.node * 2971;
     hash += c1  * 911;
     hash += c2  * 353;
     hash -= 2011;
@@ -47,7 +49,8 @@ inputs_t CondEC::get_random_uint64()
 sim_hash_t CondEC::get_simulation_hash(unsigned lit){
     bool neg = aiger_sign(lit);
     auto node = lit_node_map[aiger_strip(lit)];
-    auto sim_hash = neg ? ~node_simulation_hash_map[node] : node_simulation_hash_map[node];
+    auto sim_hash = neg ? ~node_simulation_hash_map[node.node] : node_simulation_hash_map[node.node];
+    sim_hash = node.neg ? ~sim_hash : sim_hash;
     return sim_hash;
 }
 
@@ -55,18 +58,20 @@ sim_hash_t CondEC::get_simulation_hash(unsigned lit){
 inputs_t CondEC::get_simulation_data(unsigned lit, int sim_round){
     bool neg = aiger_sign(lit);
     auto node = lit_node_map[aiger_strip(lit)];
-    auto sim_data = neg? ~node_simulation_data_map[node].at(sim_round) : node_simulation_data_map[node].at(sim_round);
+    auto sim_data = neg? ~node_simulation_data_map[node.node].at(sim_round) : node_simulation_data_map[node.node].at(sim_round);
+    sim_data = node.neg ? ~sim_data : sim_data;
     return sim_data;
 }
 
 // get satvar
 int CondEC::get_satvar(unsigned int lit){
     auto node = lit_node_map[aiger_strip(lit)];
-    auto satvar = aiger_sign(lit) ?  -node_satvar_map[node] : node_satvar_map[node];
+    auto satvar = aiger_sign(lit) ?  -node_satvar_map[node.node] : node_satvar_map[node.node];
+    satvar = node.neg ? -satvar : satvar;
     return satvar;
 }
 
-bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
+bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit, std::vector<int> condition_vec){
     int initial_sim_round = 0;
     initial_pattern_vec.resize(model_->num_inputs);
     while(initial_pattern_vec.at(0).size() <= (INITIAL_SIM_ROUND+1) * 64){  // we need to generate 1 group sim hash and 5 group sim data, (1+5)*64 bit
@@ -74,9 +79,25 @@ bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
         for(int i = 0; i < model_ -> num_inputs; i ++){
             auto input_lit = model_ -> inputs[i].lit;
             auto input_node = lit_node_map[input_lit];
+            // if aiger have input condition, we set the condition data
+            bool set_sim_data = false;
+            uint64_t sim_data_condition;
+            for(int i = 0; i < condition_vec.size(); i++){
+                if(input_lit == aiger_strip(condition_vec[i])){
+                    sim_data_condition = aiger_sign(condition_vec[i]) ? 0x0000000000000000UL : 0xFFFFFFFFFFFFFFFFUL;
+                    // std::cout << "input_lit: " << input_lit << std::endl;
+                    // std::cout << "sim_data_condition: " << sim_data_condition << std::endl;
+                    set_sim_data = true;
+                    break;
+                }
+            }
+
             for(int round = 0; round < INITIAL_ROUND; round++){
-                auto sim_data = get_random_uint64();
-                node_cond_data_map[input_node].push_back(sim_data);
+                auto random_data = get_random_uint64();
+                auto sim_data = set_sim_data ? sim_data_condition: random_data;
+                // std::cout << "input_lit: " << input_lit << std::endl;
+                // std::cout << "sim_data: " << sim_data << std::endl;
+                node_cond_data_map[input_node.node].push_back(sim_data);
             }
         }
 
@@ -96,23 +117,26 @@ bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
             auto lhs_node = lit_node_map[aiger_strip(lhs_lit)];
 
             for(int cond_sim_round = initial_sim_round; cond_sim_round < initial_sim_round + INITIAL_ROUND; cond_sim_round++){
-                auto rhs0_sim_data = aiger_sign(rhs0_lit) ? ~node_cond_data_map[rhs0_node].at(cond_sim_round) : node_cond_data_map[rhs0_node].at(cond_sim_round);
-                auto rhs1_sim_data = aiger_sign(rhs1_lit) ? ~node_cond_data_map[rhs1_node].at(cond_sim_round) : node_cond_data_map[rhs1_node].at(cond_sim_round);
+                auto rhs0_sim_data = aiger_sign(rhs0_lit) ? ~node_cond_data_map[rhs0_node.node].at(cond_sim_round) : node_cond_data_map[rhs0_node.node].at(cond_sim_round);
+                rhs0_sim_data = rhs0_node.neg ? ~rhs0_sim_data : rhs0_sim_data;
+                auto rhs1_sim_data = aiger_sign(rhs1_lit) ? ~node_cond_data_map[rhs1_node.node].at(cond_sim_round) : node_cond_data_map[rhs1_node.node].at(cond_sim_round);
+                rhs1_sim_data = rhs0_node.neg ? ~rhs1_sim_data : rhs1_sim_data;
                 auto lhs_sim_data = rhs0_sim_data & rhs1_sim_data;
-                node_cond_data_map[lhs_node].push_back(lhs_sim_data);
+                node_cond_data_map[lhs_node.node].push_back(lhs_sim_data);
             }
         }
 
         // get the sat solutions
         auto condition_node = lit_node_map[aiger_strip(condition_lit)];
         for(int cond_sim_round = initial_sim_round; cond_sim_round < initial_sim_round + INITIAL_ROUND; cond_sim_round++){
-            auto condition_sim_data = aiger_sign(condition_lit) ?  ~node_cond_data_map[condition_node].at(cond_sim_round) : node_cond_data_map[condition_node].at(cond_sim_round);
+            auto condition_sim_data = aiger_sign(condition_lit) ?  ~node_cond_data_map[condition_node.node].at(cond_sim_round) : node_cond_data_map[condition_node.node].at(cond_sim_round);
+            condition_sim_data = condition_node.neg ? ~condition_sim_data : condition_sim_data;
             for (int i = 0; i < 64; ++i) {
                 if (condition_sim_data & (1ULL << i)) { // if sim data bit == 1
                     for(int j = 0; j < model_ -> num_inputs; j ++){
                         auto input_lit = model_ -> inputs[j].lit;
                         auto input_node = lit_node_map[input_lit];
-                        auto input_bit = node_cond_data_map[input_node].at(cond_sim_round) & (1ULL << i);
+                        auto input_bit = node_cond_data_map[input_node.node].at(cond_sim_round) & (1ULL << i);
                         initial_pattern_vec.at(j).push_back(input_bit);
                     }
                 }
@@ -138,7 +162,7 @@ bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
             sim_hash <<= 1;
             sim_hash |= (initial_pattern_vec.at(i).at(pattern_round) ? 1 : 0);
         }
-        node_simulation_hash_map[input_node] = sim_hash;
+        node_simulation_hash_map[input_node.node] = sim_hash;
 
         for(int pattern_round = 64; pattern_round < (INITIAL_SIM_ROUND+1) * 64; pattern_round++){
             sim_data <<= 1;
@@ -146,12 +170,12 @@ bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit){
             initial_sim_num++;
             if(initial_sim_num == 64){
                 auto input_node = lit_node_map[model_->inputs[i].lit];
-                node_simulation_data_map[input_node].push_back(sim_data);
+                node_simulation_data_map[input_node.node].push_back(sim_data);
                 initial_sim_num = 0;
             }
         }
         
-        assert(node_simulation_data_map[input_node].size() == INITIAL_SIM_ROUND);
+        assert(node_simulation_data_map[input_node.node].size() == INITIAL_SIM_ROUND);
     }
 
     return false;
@@ -169,7 +193,7 @@ void CondEC::create_new_simulation_data(){
             new_sim_data |= (new_input_pattern_vec.at(i).at(pattern_round) ? 1 : 0);
         }
         auto input_node = lit_node_map[model_->inputs[i].lit];
-        node_simulation_data_map[input_node].push_back(new_sim_data);
+        node_simulation_data_map[input_node.node].push_back(new_sim_data);
         // std::cout << "input node " << input_node << " new sim data: " << new_sim_data << std::endl;
     }
     
@@ -192,8 +216,8 @@ void CondEC::update_all_sim_data(unsigned int lhs_lit_end){
         auto sim_data = rhs0_sim_data & rhs1_sim_data;
 
         auto and_node = lit_node_map[lhs_lit];
-        if(node_simulation_data_map[and_node].size() == INITIAL_SIM_ROUND + new_sim_data_num - 1){
-            node_simulation_data_map[and_node].push_back(sim_data);
+        if(node_simulation_data_map[and_node.node].size() == INITIAL_SIM_ROUND + new_sim_data_num - 1){
+            node_simulation_data_map[and_node.node].push_back(sim_data);
         }
         
     }
@@ -211,10 +235,11 @@ bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equival
         auto miter_i2 = lhs_satvar;
         auto miter_o = create_satvar();
         create_miter(miter_o, miter_i1, miter_i2, assumption);  // clause OR assumption
-        unit(miter_o, assumption);  // clause OR assumption
+        // unit(miter_o, assumption);  // clause OR assumption
+        kissat_assume(solver_, miter_o);
 
         kissat_assume(solver_, -assumption);    // make assumption = flase, enable clause of this function
-        kissat_set_decision_limit(solver_, 10000);
+        kissat_set_decision_limit(solver_, 20000);
         kissat_set_conflict_limit(solver_, 10000);
         int res = kissat_solve(solver_);   // decision_limit 10000?, we hope to balance cec time and merge number
 
@@ -226,7 +251,7 @@ bool CondEC::cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equival
             for(int i = 0; i < model_ -> num_inputs; i ++){
                 auto input_lit = model_ -> inputs[i].lit;
                 auto input_node = lit_node_map[input_lit];
-                auto input_satvar = node_satvar_map[input_node];
+                auto input_satvar = node_satvar_map[input_node.node];
 
                 int sat_assignment = kissat_value(solver_, input_satvar);
                 bool sim_bit = (sat_assignment > 0) ? 1 : 0;
@@ -259,7 +284,8 @@ void CondEC::cec_inputs_register(){
 
         // lit <-> node
         auto input_node = create_new_node();
-        lit_node_map[input_lit] = input_node;
+        node_neg input_node_pn = {input_node, 0};
+        lit_node_map[input_lit] = input_node_pn;
         node_lit_map[input_node] = input_lit;
         
         // node -> sat var
@@ -271,7 +297,7 @@ void CondEC::cec_inputs_register(){
     }
 }
 
-void CondEC::cec_condition_register(unsigned int &condition_output){
+void CondEC::cec_condition_register(unsigned int &condition_output, std::vector<int> &condition_vec){
     // get the condition lit 
     auto condition_lit = condition_output;
     int condition_node_number = 0;
@@ -313,7 +339,8 @@ void CondEC::cec_condition_register(unsigned int &condition_output){
 
             // lit <-> node
             auto and_node = create_new_node();
-            lit_node_map[cur_lit] = and_node;
+            node_neg and_node_pn = {and_node, 0};
+            lit_node_map[cur_lit] = and_node_pn;
             // node_lit_map[and_node] = cur_lit;
 
             // node <-> sat var
@@ -332,16 +359,17 @@ void CondEC::cec_condition_register(unsigned int &condition_output){
     }// end of while
 
     // add condition to picosat
-    auto condition_node = lit_node_map[aiger_strip(condition_lit)];
-    auto condition_satvar = aiger_sign(condition_lit) ? -node_satvar_map[condition_node] : node_satvar_map[condition_node];
+    // auto condition_node = lit_node_map[aiger_strip(condition_lit)];
+    // auto condition_satvar = aiger_sign(condition_lit) ? -node_satvar_map[condition_node.node] : node_satvar_map[condition_node.node];
+    auto condition_satvar = get_satvar(condition_lit);
     unit(condition_satvar);
 
     std::cout << "total create condition node number: " << condition_node_number << std::endl;
     
-    auto enable = generate_initial_sim_hash_data(condition_lit);
+    auto enable = generate_initial_sim_hash_data(condition_lit, condition_vec);
 
     if(enable){
-        std::cout << "dont generate condition sim data, so we set default data" << std::endl;
+        std::cout << "can't generate condition sim data, so we set random sim data" << std::endl;
         for(int i = 0; i < model_ -> num_inputs; i ++){
         // get the lit from aiger model
         auto input_lit = model_ -> inputs[i].lit;
@@ -351,13 +379,13 @@ void CondEC::cec_condition_register(unsigned int &condition_output){
 
         // sim hash
         auto sim_hash = get_random_uint64();
-        node_simulation_hash_map[input_node] = sim_hash;
+        node_simulation_hash_map[input_node.node] = sim_hash;
 
         auto sim_data = sim_hash;
         // sim data
         for(int sim_round = 0; sim_round < INITIAL_SIM_ROUND; sim_round++){
             // auto sim_data = get_random_uint64();
-            node_simulation_data_map[input_node].push_back(sim_data);
+            node_simulation_data_map[input_node.node].push_back(sim_data);
         }
         
         }
@@ -389,6 +417,8 @@ void CondEC::cec_ands_register(){
         auto id2 = lit_node_map[aiger_strip(rhs1_lit)];
         bool c1 = aiger_sign(rhs0_lit);
         bool c2 = aiger_sign(rhs1_lit);
+        c1 = id1.neg ? !c1 : c1;
+        c2 = id2.neg ? !c2 : c2;
 
         bool structural_hash_merge = false;
         if(structural_hash_nodevec_map.find(structral_hash) != structural_hash_nodevec_map.end()){  // check if same structural hash
@@ -403,11 +433,20 @@ void CondEC::cec_ands_register(){
                 auto other_id2 = lit_node_map[aiger_strip(other_and_gate->rhs1)];
                 bool other_c1 = aiger_sign(other_and_gate->rhs0);
                 bool other_c2 = aiger_sign(other_and_gate->rhs1);
-                
+                other_c1 = other_id1.neg ? !other_c1 : other_c1;
+                other_c2 = other_id2.neg ? !other_c2 : other_c2;
+
                 // check if same input (id1, id2, c1, c2)
-                if((id1 == other_id1) && (id2 == other_id2) && (c1 == other_c1) && (c2 == other_c2)){
+                if((id1.node == other_id1.node) && (id2.node == other_id2.node) && (c1 == other_c1) && (c2 == other_c2)){
                     // node have equivalence node, not create, just map to old node
-                    lit_node_map[lhs_lit] = other_node;
+                    node_neg other_node_pn = {other_node,0};
+                    lit_node_map[lhs_lit] = other_node_pn;
+                    if(condition_created){
+                        auto satvar = get_satvar(lhs_lit);
+                        auto eq_satvar = node_satvar_map[other_node];
+                        binary(satvar, -eq_satvar);
+                        binary(-satvar, eq_satvar);
+                    }
 
                     structural_hash_merge_num++;
                     structural_hash_merge = true;
@@ -452,8 +491,21 @@ void CondEC::cec_ands_register(){
         }
 
         // find CEC possible equivalence node (neg) 
-            // ...
+        std::vector<unsigned> cec_candidate_neg;
+        auto lhs_sim_hash_neg = ~lhs_sim_hash;
+        std::vector<uint64_t> lhs_sim_data_neg;
+        for (auto val : lhs_sim_data){
+            lhs_sim_data_neg.push_back(~val);
+        }
 
+        if(simulation_hash_nodevec_map.find(lhs_sim_hash_neg) != simulation_hash_nodevec_map.end()){    // check if neg sim hash
+            for(auto &other_node : simulation_hash_nodevec_map[lhs_sim_hash_neg]){
+                if(node_simulation_data_map[other_node] == lhs_sim_data_neg){   // double check if neg sim data
+                    // push possible equivalence node
+                    cec_candidate_neg.push_back(other_node);
+                }
+            }
+        }
 
         // CEC
         auto rhs0_satvar = get_satvar(rhs0_lit);
@@ -471,81 +523,105 @@ void CondEC::cec_ands_register(){
         unsigned equivalence_node;
         if (!cec_candidate.empty()){
             merge = cec_checker(cec_candidate, equivalence_node, rhs0_satvar, rhs1_satvar, satvar);
-        }
 
+            if(merge){
+                // node have equivalence node, not create, just map to old node
+                // new: pre_node = equivalence_node
+                if(condition_created){
+                    auto eq_satvar = node_satvar_map[equivalence_node];
+                    binary(satvar, -eq_satvar);
+                    binary(-satvar, eq_satvar);
+                }
+                node_neg equivalence_node_pn = {equivalence_node, 0};
+                lit_node_map[lhs_lit] = equivalence_node_pn;
+                cec_merge_num++;
+                std::cout << "[cec] lit " << lhs_lit << " merge!" << std::endl;
+                std::cout << "sat: " << cec_sat_num  << ", unknow: " << cec_unknow_num << ", unsat: " << cec_unsat_num << std::endl;
+                std::cout << "-------------------------------------" << std::endl;
+                continue;
+            }
+        }
+        
+        bool merge_neg = false;
+        if (!cec_candidate_neg.empty() && (!merge)){
+            merge_neg = cec_checker(cec_candidate, equivalence_node, rhs0_satvar, rhs1_satvar, -satvar);
+
+            if(merge_neg){
+                if(condition_created){
+                    auto eq_satvar = node_satvar_map[equivalence_node];
+                    binary(satvar, eq_satvar);
+                    binary(-satvar, -eq_satvar);
+                }
+                node_neg equivalence_node_pn = {equivalence_node, 1};
+                lit_node_map[lhs_lit] = equivalence_node_pn; // -------------------------------------------------------------------------bug need to modify  lit -> -node
+                cec_merge_num++;
+                std::cout << "[cec] lit " << lhs_lit << " merge!" << std::endl;
+                std::cout << "sat: " << cec_sat_num  << ", unknow: " << cec_unknow_num << ", unsat: " << cec_unsat_num << std::endl;
+                std::cout << "-------------------------------------" << std::endl;
+                continue;
+            }
+        }
 
         // final handle
-        if(merge){
-            // node have equivalence node, not create, just map to old node
-            lit_node_map[lhs_lit] = equivalence_node;
-            cec_merge_num++;
-            std::cout << "[cec] lit " << lhs_lit << " merge!" << std::endl;
-            std::cout << "sat: " << cec_sat_num  << ", unknow: " << cec_unknow_num << ", unsat: " << cec_unsat_num << std::endl;
-            std::cout << "-------------------------------------" << std::endl;
-            continue;
+        // node haven't equivalence node, create new node and update map
+        assert(merge == false);
+        assert(merge_neg == false);
+        if(condition_created){
+            // use previous node
+            auto and_node = lit_node_map[lhs_lit];
+
+            // lit <-> node, lit -> node already map
+            node_lit_map[and_node.node] = lhs_lit;
+
+            // node -> satvar already map
+                
+            // structural hash -> node
+            structural_hash_nodevec_map[structral_hash].push_back(and_node.node);
+
+            // node <-> simulation hash
+            node_simulation_hash_map[and_node.node] = lhs_sim_hash;
+            simulation_hash_nodevec_map[lhs_sim_hash].push_back(and_node.node);
+    
+            // node -> simulation data
+            node_simulation_data_map[and_node.node] = lhs_sim_data;
         }
         else{
-            // node haven't equivalence node, create new node and update map
-            if(condition_created){
-                // use previous node
-                auto and_node = lit_node_map[lhs_lit];
+            // create new node
+            auto and_node = create_new_node();
 
-                // lit <-> node, lit -> node already map
-                node_lit_map[and_node] = lhs_lit;
+            // lit <-> node
+            node_neg and_node_np = {and_node, 0};
+            lit_node_map[lhs_lit] = and_node_np;
+            node_lit_map[and_node] = lhs_lit;
 
-                // node -> satvar already map
-                
-                // structural hash -> node
-                structural_hash_nodevec_map[structral_hash].push_back(and_node);
+            // node -> satvar
+            node_satvar_map[and_node] = satvar; // first check node if have equivalence node, if node haven't equivalence node, use it
 
-                // node <-> simulation hash
-                node_simulation_hash_map[and_node] = lhs_sim_hash;
-                simulation_hash_nodevec_map[lhs_sim_hash].push_back(and_node);
+            // structural hash -> node
+            structural_hash_nodevec_map[structral_hash].push_back(and_node);
 
-                // node -> simulation data
-                node_simulation_data_map[and_node] = lhs_sim_data;
+            // node <-> simulation hash
+            node_simulation_hash_map[and_node] = lhs_sim_hash;
+            simulation_hash_nodevec_map[lhs_sim_hash].push_back(and_node);
 
-                // cnf already add in cec_condition_register    
-                // auto satvar = node_satvar_map[and_node];          
-                // create_andgate(satvar, rhs0_satvar, rhs1_satvar); 
+            // node -> simulation data
+            node_simulation_data_map[and_node] = lhs_sim_data;
+
+            // add cnf
+            create_andgate(satvar, rhs0_satvar, rhs1_satvar);
+        }
+
+        // if we have 64 sat solutions, update one round sim data
+        if(new_input_pattern_vec.size() != 0){  // maybe new_input_pattern_vec not have at 0
+            if(new_input_pattern_vec.at(0).size() >= 64*(new_sim_data_num + 1)){   
+                std::cout << "new_input_pattern_vec.at(0).size(): " << new_input_pattern_vec.at(0).size() << std::endl; 
+                // creater new input sim data from picosat sat
+                create_new_simulation_data();
+                // update sim data for all created node
+                update_all_sim_data(lhs_lit);
             }
-            else{
-                // create new node
-                auto and_node = create_new_node();
-
-                // lit <-> node
-                lit_node_map[lhs_lit] = and_node;
-                node_lit_map[and_node] = lhs_lit;
-
-                // node -> satvar
-                node_satvar_map[and_node] = satvar; // first check node if have equivalence node, if node haven't equivalence node, use it
-
-                // structural hash -> node
-                structural_hash_nodevec_map[structral_hash].push_back(and_node);
-
-                // node <-> simulation hash
-                node_simulation_hash_map[and_node] = lhs_sim_hash;
-                simulation_hash_nodevec_map[lhs_sim_hash].push_back(and_node);
-
-                // node -> simulation data
-                node_simulation_data_map[and_node] = lhs_sim_data;
-
-                // add cnf
-                create_andgate(satvar, rhs0_satvar, rhs1_satvar);
-            }
-
-            // if we have 64 sat solutions, update one round sim data
-            if(new_input_pattern_vec.size() != 0){  // maybe new_input_pattern_vec not have at 0
-                if(new_input_pattern_vec.at(0).size() >= 64*(new_sim_data_num + 1)){   
-                    std::cout << "new_input_pattern_vec.at(0).size(): " << new_input_pattern_vec.at(0).size() << std::endl; 
-                    // creater new input sim data from picosat sat
-                    create_new_simulation_data();
-                    // update sim data for all created node
-                    update_all_sim_data(lhs_lit);
-                }
-            }
-
-        }   // end of final handle
+        }
+        // end of final handle
 
         std::cout << "sat: " << cec_sat_num  << ", unknow: " << cec_unknow_num << ", unsat: " << cec_unsat_num << std::endl;
         std::cout << "-------------------------------------" << std::endl;
@@ -565,8 +641,8 @@ void CondEC::cec_solve(){
     std::cout << "-------------------------------------" << std::endl;
 
     // final sat result for output
-    auto lhs_lit  = model_ -> outputs[0].lit;
-    auto satvar = get_satvar(lhs_lit);
+    auto miter_out  = model_ -> outputs[0].lit;
+    auto satvar = get_satvar(miter_out);
     unit(satvar);
     int res = kissat_solve(solver_);    //return 10 = sat, 20 = unsat, 0 = unknow
     

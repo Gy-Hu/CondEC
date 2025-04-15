@@ -43,7 +43,7 @@ private:
     int create_satvar(){ return ++solver_satvar;}
 
 public:
-    /*  new map:
+    /*  map:
         lit             -> from aiger model
         node            -> our new model create
         satvar          -> picosat create
@@ -51,8 +51,25 @@ public:
         simulation_hash -> CondEC create
         simulation_data -> CondEC create
     */
+
+    /*  new map:
+        lit             -> from aiger model
+        node            -> new struct create
+        satvar          -> sat solver create
+        structural_hash -> CondEC create
+        simulation_hash -> CondEC create
+        simulation_data -> CondEC create
+
+        lit -> {node, neg} -> satvar
+    */
+
+    struct node_neg{
+        unsigned node;
+        unsigned neg;
+    };
+
     // lit <-> node
-    std::map<unsigned, unsigned>                lit_node_map;   // many lit can map to one node
+    std::map<unsigned, node_neg>                lit_node_map;   // many lit can map to one node
     std::map<unsigned, unsigned>                node_lit_map;   // node only map to one origin lit
 
     // node -> satvar
@@ -92,7 +109,7 @@ public:
     int create_structural_hash(unsigned rsh0, unsigned rsh1);
 
     // for inputs, generate initial 1 sim hash and INITIAL_SIM_ROUND sim pattern that sat condition
-    bool generate_initial_sim_hash_data(unsigned condition_lit);
+    bool generate_initial_sim_hash_data(unsigned condition_lit, std::vector<int> condition_vec);
 
     // cec and-gates stage
     bool cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar);
@@ -109,7 +126,7 @@ public:
     void cec_inputs_register();
 
     // cec conditional outputs stage
-    void cec_condition_register(unsigned int &condition_output);
+    void cec_condition_register(unsigned int &condition_output, std::vector<int> &condition_vec);
 
     // cec and-gates stage
     void cec_ands_register();
