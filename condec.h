@@ -4,18 +4,19 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <unordered_map>
 
 
 extern "C" {
-#include "aiger/aiger.h"
+#include "aiger.h"
 #include "kissat_extras/src/kissat.h"
 }
 
 typedef uint64_t inputs_t;
 typedef uint64_t sim_hash_t;
 
-#define INITIAL_ROUND 10    // need to more than INITIAL_SIM_ROUND, because not every bit can sat condition
-#define INITIAL_SIM_ROUND 3    // 5 sim data
+#define INITIAL_ROUND 15    // need to more than INITIAL_SIM_ROUND, because not every bit can sat condition
+#define INITIAL_SIM_ROUND 10    // sim data
 
 class CondEC
 {
@@ -41,6 +42,7 @@ private:
     // solver
     int solver_satvar;
     int create_satvar(){ return ++solver_satvar;}
+    int condition_satvar;
 
 public:
     /*  map:
@@ -69,23 +71,22 @@ public:
     };
 
     // lit <-> node
-    std::map<unsigned, node_neg>                lit_node_map;   // many lit can map to one node
-    std::map<unsigned, unsigned>                node_lit_map;   // node only map to one origin lit
+    std::unordered_map<unsigned, node_neg>                lit_node_map;   // many lit can map to one node
+    std::unordered_map<unsigned, unsigned>                node_lit_map;   // node only map to one origin lit
 
     // node -> satvar
-    std::map<unsigned, int>                     node_satvar_map;
+    std::unordered_map<unsigned, int>                     node_satvar_map;
 
     // node <-> structural hash
-    // std::map<unsigned, int>                     node_structural_hash_map;
-    std::map<int, std::vector<unsigned>>        structural_hash_nodevec_map;
+    std::unordered_map<int, std::vector<unsigned>>        structural_hash_nodevec_map;
 
     // node <-> sim hash
-    std::map<unsigned, uint64_t>                node_simulation_hash_map;
-    std::map<uint64_t, std::vector<unsigned>>   simulation_hash_nodevec_map;
+    std::unordered_map<unsigned, sim_hash_t>                node_simulation_hash_map;
+    std::unordered_map<sim_hash_t, std::vector<unsigned>>   simulation_hash_nodevec_map;
 
     // node -> sim data vec
-    std::map<unsigned, std::vector<uint64_t>>   node_simulation_data_map;   // node -> simulation data vec
-    std::map<unsigned, std::vector<uint64_t>>   node_cond_data_map;
+    std::unordered_map<unsigned, std::vector<inputs_t>>   node_simulation_data_map;   // node -> simulation data vec
+    std::unordered_map<unsigned, std::vector<inputs_t>>   node_cond_data_map;
 
 
     // generate 64 bit random data for initial sim hash and sim data
@@ -112,7 +113,8 @@ public:
     bool generate_initial_sim_hash_data(unsigned condition_lit, std::vector<int> condition_vec);
 
     // cec and-gates stage
-    bool cec_checker(std::vector<unsigned> &cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar);
+    bool cec_checker(const std::vector<unsigned> &cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar);
+    bool cec_checker_neg(const std::vector<unsigned> &cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar);
 
     // create new input sim data
     void create_new_simulation_data();
@@ -132,7 +134,7 @@ public:
     void cec_ands_register();
 
     // cec final solve stage
-    void cec_solve();
+    int cec_solve();
 
     CondEC(aiger *model, kissat *solver): model_(model), solver_(solver), node_number(0), structural_hash_merge_num(0), cec_merge_num(0), cec_sat_num(0), cec_unknow_num(0), cec_unsat_num(0),
                 initial_pattern_vec(0), new_input_pattern_vec(0), new_sim_data_num(0), solver_satvar(0){};

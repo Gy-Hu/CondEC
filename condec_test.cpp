@@ -8,7 +8,7 @@
 #include "condec.h"
 
 extern "C" {
-#include "aiger/aiger.h"
+#include "aiger.h"
 #include "kissat_extras/src/kissat.h"
 }
 
@@ -203,22 +203,30 @@ auto clk_start = std::chrono::high_resolution_clock::now();
     condeq_check.cec_inputs_register();
     condeq_check.cec_condition_register(condition_output, condition_vec);
     // add all conditions separately to the solver, it will sat faster
-    if(condition_vec.size() > 10){
-        for(auto &cond_output : condition_vec){
-            auto cond_node = condeq_check.lit_node_map[aiger_strip(cond_output)];
-            auto cond_satvar = aiger_sign(cond_output) ? -condeq_check.node_satvar_map[cond_node.node] : condeq_check.node_satvar_map[cond_node.node];
-            cond_satvar = cond_node.neg ? ~cond_satvar : cond_satvar;
-            condeq_check.unit(cond_satvar);
-        }
-    }
+    // if(condition_vec.size() > 10){
+    //     for(auto &cond_output : condition_vec){
+    //         auto cond_node = condeq_check.lit_node_map[aiger_strip(cond_output)];
+    //         auto cond_satvar = aiger_sign(cond_output) ? -condeq_check.node_satvar_map[cond_node.node] : condeq_check.node_satvar_map[cond_node.node];
+    //         cond_satvar = cond_node.neg ? ~cond_satvar : cond_satvar;
+    //         condeq_check.unit(cond_satvar);
+    //     }
+    // }
     condeq_check.cec_ands_register();
-    condeq_check.cec_solve();
+    auto res = condeq_check.cec_solve();
+
+    std::string sat_res;
+    if(res == 10)
+        sat_res = "SAT";
+    else if(res == 20)
+        sat_res = "UNSAT";
+    else
+        sat_res = "UNKNOW";
 
 auto clk_end = std::chrono::high_resolution_clock::now();
 
     std::chrono::duration<double> cec_time = clk_end - clk_start;
     std::cout.clear();
-    std::cout << "conditional equilvalence time: " << cec_time.count() << " seconds\n";
+    std::cout << name << ", " << sat_res << ", time: " << cec_time.count() << " s\n";
 
     kissat_release(solver);
     aiger_reset(model);
