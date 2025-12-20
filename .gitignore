@@ -1,7 +1,6 @@
 # Prerequisites
 *.d
 .vscode/*
-kissat_extras/
 log/
 
 # Compiled Object files

@@ -6,10 +6,10 @@
 #include <map>
 #include <unordered_map>
 
+#include "cadical/src/cadical.hpp"
 
 extern "C" {
 #include "aiger.h"
-#include "kissat_extras/src/kissat.h"
 }
 
 typedef uint64_t inputs_t;
@@ -23,7 +23,7 @@ class CondEC
 private:
     /* data */
     aiger * model_;
-    kissat *solver_;
+    CaDiCaL::Solver *solver_;
     unsigned node_number;   // node is our new model node
     unsigned structural_hash_merge_num;
     unsigned cec_merge_num;
@@ -136,80 +136,69 @@ public:
     // cec final solve stage
     int cec_solve();
 
-    CondEC(aiger *model, kissat *solver): model_(model), solver_(solver), node_number(0), structural_hash_merge_num(0), cec_merge_num(0), cec_sat_num(0), cec_unknow_num(0), cec_unsat_num(0),
+    CondEC(aiger *model, CaDiCaL::Solver *solver): model_(model), solver_(solver), node_number(0), structural_hash_merge_num(0), cec_merge_num(0), cec_sat_num(0), cec_unknow_num(0), cec_unsat_num(0),
                 initial_pattern_vec(0), new_input_pattern_vec(0), new_sim_data_num(0), solver_satvar(0){};
 
 
-    /********************************* KISSAT SOLVER *******************************/
+    /********************************* Cadical Solver *******************************/
     void inline unit(int a)
-    {   
-        kissat_add(solver_, a);
-        kissat_add(solver_, 0);
+    {
+        solver_ -> clause(a);
     }
 
     void inline unit(int a, int assumption)
-    {   
-        kissat_add(solver_, a);
-        kissat_add(solver_, assumption);
-        kissat_add(solver_, 0);
+    {
+        solver_ -> clause(a, assumption);
     }
 
     void inline binary(int a, int b)
     {   
-        kissat_add(solver_, a);
-        kissat_add(solver_, b);
-        kissat_add(solver_, 0);
+        solver_ -> clause(a, b);
     }
     
     void inline ternary(int a, int b, int c)
     {   
-        kissat_add(solver_, a);
-        kissat_add(solver_, b);
-        kissat_add(solver_, c);
-        kissat_add(solver_, 0);
+        solver_ -> clause(a, b, c);
     }
 
     void inline quaternary(int a, int b, int c, int d)
     {   
-        kissat_add(solver_, a);
-        kissat_add(solver_, b);
-        kissat_add(solver_, c);
-        kissat_add(solver_, d);
-        kissat_add(solver_, 0);
+        solver_ -> clause(a, b, c, d);
     }
 
     void inline create_miter(int c, int a, int b)
     {
         // c = a xor b
         // cnf: (𝑎∨𝑏∨¬𝑐)∧(¬𝑎∨¬𝑏∨¬𝑐)∧(¬𝑎∨𝑏∨𝑐)∧(𝑎∨¬𝑏∨𝑐)
-        ternary(a, b, -c);
-        ternary(-a, -b, -c);
-        ternary(-a, b, c);
-        ternary(a, -b, c);
+        solver_ -> clause(a, b, -c);
+        solver_ -> clause(-a, -b, -c);
+        solver_ -> clause(-a, b, c);
+        solver_ -> clause(a, -b, c);
     }
 
     void inline create_miter(int c, int a, int b, int assumption)
     {
-        quaternary(a, b, -c, assumption);
-        quaternary(-a, -b, -c, assumption);
-        quaternary(-a, b, c, assumption);
-        quaternary(a, -b, c, assumption);
+        // c = a xor b
+        // cnf: (𝑎∨𝑏∨¬𝑐)∧(¬𝑎∨¬𝑏∨¬𝑐)∧(¬𝑎∨𝑏∨𝑐)∧(𝑎∨¬𝑏∨𝑐)
+        solver_ -> clause(a, b, -c, assumption);
+        solver_ -> clause(-a, -b, -c, assumption);
+        solver_ -> clause(-a, b, c, assumption);
+        solver_ -> clause(a, -b, c, assumption);
     }
 
     void inline create_andgate(int lhs, int rhs0, int rhs1)
     {   
         // satvar_lhs = satvar_rhs0 and satvar_rhs1
-        binary(-lhs, rhs0);
-        binary(-lhs, rhs1);
-        ternary(lhs, -rhs0, -rhs1);
+        solver_ -> clause(-lhs, rhs0);
+        solver_ -> clause(-lhs, rhs1);
+        solver_ -> clause(lhs, -rhs0, -rhs1);
     }
 
     void inline create_andgate(int lhs, int rhs0, int rhs1, int assumption)
     {   
-        ternary(-lhs, rhs0, assumption);
-        ternary(-lhs, rhs1, assumption);
-        quaternary(lhs, -rhs0, -rhs1, assumption);
-
+        solver_ -> clause(-lhs, rhs0, assumption);
+        solver_ -> clause(-lhs, rhs1, assumption);
+        solver_ -> clause(lhs, -rhs0, -rhs1, assumption);
     }
     
 };

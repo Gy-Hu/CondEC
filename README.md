@@ -1,10 +1,9 @@
-# CondEC
-Conditional Equivalence Checking
+# CondEC: Conditional Equivalence Checking
 
-### How to start
+### Deps
 
-    git clone https://github.com/jix/kissat_extras.git
-    cd kissat_extras
+    git clone https://github.com/arminbiere/cadical.git
+    cd cadical
     ./configure && make
     cd ..
 
@@ -14,4 +13,4 @@ Conditional Equivalence Checking
 
 ### Run
 
-    ./condec_test <AIGER FILE>
+    ./condec <AIGER FILE>

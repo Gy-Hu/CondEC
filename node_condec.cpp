@@ -7,7 +7,7 @@
 #include <chrono>
 #include <algorithm>
 
-#include "condec.h"
+#include "node_condec.h"
 
 extern "C" {
 #include "aiger.h"
@@ -233,16 +233,13 @@ bool CondEC::cec_checker(const std::vector<unsigned>& cec_candidate, unsigned &e
         auto miter_i2 = lhs_satvar;
         auto miter_o = create_satvar();
         create_miter(miter_o, miter_i1, miter_i2, assumption);  // clause OR assumption
-        kissat_assume(solver_, miter_o);
-        kissat_assume(solver_, -assumption);    // make assumption = flase, enable clause of this function
 
-            // unit(miter_o, assumption);  // clause OR assumption
-            // kissat_assume(solver_, -assumption);    // make assumption = flase,
+        // unit(miter_o, assumption);  // clause OR assumption
+        solver_->assume(miter_o);
+        solver_->assume(-assumption);    // make assumption = flase,
 
-        
-        kissat_set_decision_limit(solver_, 20000);
-        kissat_set_conflict_limit(solver_, 10000);
-        int res = kissat_solve(solver_);   // decision_limit 10000?, we hope to balance cec time and merge number
+        solver_ ->limit("conflicts", 10000);
+        int res = solver_ -> solve();
 
         if(res == 10){
             // add more sim round and sim data
@@ -254,7 +251,7 @@ bool CondEC::cec_checker(const std::vector<unsigned>& cec_candidate, unsigned &e
                 auto input_node = lit_node_map[input_lit];
                 auto input_satvar = node_satvar_map[input_node.node];
 
-                int sat_assignment = kissat_value(solver_, input_satvar);
+                int sat_assignment = solver_ -> val(input_satvar);
                 bool sim_bit = (sat_assignment > 0) ? 1 : 0;
                 new_input_pattern_vec.at(i).push_back(sim_bit);
             }
@@ -287,16 +284,12 @@ bool CondEC::cec_checker_neg(const std::vector<unsigned>& cec_candidate, unsigne
         auto miter_i2 = lhs_satvar;
         auto miter_o = create_satvar();
         create_miter(miter_o, -miter_i1, miter_i2, assumption);  // clause OR assumption
-        kissat_assume(solver_, miter_o);
-        kissat_assume(solver_, -assumption);    // make assumption = flase, enable clause of this function
-
-            // unit(miter_o, assumption);  // clause OR assumption
-            // kissat_assume(solver_, -assumption);    // make assumption = flase,
-
         
-        kissat_set_decision_limit(solver_, 20000);
-        kissat_set_conflict_limit(solver_, 10000);
-        int res = kissat_solve(solver_);   // decision_limit 10000?, we hope to balance cec time and merge number
+        solver_->assume(miter_o);
+        solver_->assume(-assumption);    // make assumption = flase,
+
+        solver_ ->limit("conflicts", 10000);
+        int res = solver_ -> solve();
 
         if(res == 10){
             // add more sim round and sim data
@@ -308,7 +301,7 @@ bool CondEC::cec_checker_neg(const std::vector<unsigned>& cec_candidate, unsigne
                 auto input_node = lit_node_map[input_lit];
                 auto input_satvar = node_satvar_map[input_node.node];
 
-                int sat_assignment = kissat_value(solver_, input_satvar);
+                int sat_assignment = solver_ -> val(input_satvar);
                 bool sim_bit = (sat_assignment > 0) ? 1 : 0;
                 new_input_pattern_vec.at(i).push_back(sim_bit);
             }
@@ -348,7 +341,7 @@ void CondEC::cec_inputs_register(){
         node_satvar_map[input_node] = satvar;
 
         // structral hash -> node
-        structural_hash_nodevec_map[input_node].push_back(input_node);
+        // structural_hash_nodevec_map[input_node].push_back(input_node);
     }
 }
 
@@ -456,6 +449,8 @@ void CondEC::cec_ands_register(){
         auto rhs1_lit = model_ -> ands[i].rhs1;
         auto lhs_lit  = model_ -> ands[i].lhs;
 
+        if(lhs_lit >= aiger_strip(model_->constraints[0].lit)) 
+            break;
 
         // check node is created in condition register?
         bool condition_created = false;
@@ -506,22 +501,6 @@ void CondEC::cec_ands_register(){
                     structural_hash_merge_num++;
                     structural_hash_merge = true;
                     std::cout << "[structural] lit " << lhs_lit << " merge!" << std::endl; 
-                    break;  // jump out for
-                }
-                if((id1.node == other_id1.node) && (id2.node == other_id2.node) && (c1 != other_c1) && (c2 != other_c2)){
-                    // node have equivalence node, not create, just map to old node
-                    node_neg other_node_pn = {other_node,1};
-                    lit_node_map[lhs_lit] = other_node_pn;
-                    if(condition_created){
-                        auto satvar = get_satvar(lhs_lit);
-                        auto eq_satvar = node_satvar_map[other_node];
-                        binary(satvar, eq_satvar);
-                        binary(-satvar, -eq_satvar);
-                    }
-
-                    structural_hash_merge_num++;
-                    structural_hash_merge = true;
-                    std::cout << "[structural neg] lit " << lhs_lit << " merge!" << std::endl; 
                     break;  // jump out for
                 }
             }
@@ -634,10 +613,10 @@ void CondEC::cec_ands_register(){
                 continue;
             }
         }
+        assert(merge_neg == false); 
 
         // final handle
         // node haven't equivalence node, create new node and update map
-        assert(merge_neg == false);
         if(condition_created){
             // use previous node
             auto and_node = lit_node_map[lhs_lit];
@@ -716,7 +695,7 @@ int CondEC::cec_solve(){
     auto miter_out  = model_ -> outputs[0].lit;
     auto satvar = get_satvar(miter_out);
     unit(satvar);
-    int res = kissat_solve(solver_);    //return 10 = sat, 20 = unsat, 0 = unknow
+    int res = solver_ -> solve();    //return 10 = sat, 20 = unsat, 0 = unknow
     
     if(res == 10)
         std::cout << "final sat result: SAT" << std::endl;
