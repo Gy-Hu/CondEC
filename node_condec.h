@@ -5,7 +5,6 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
-
 #include "cadical/src/cadical.hpp"
 
 extern "C" {
@@ -41,7 +40,10 @@ private:
 
     // solver
     int solver_satvar;
-    int create_satvar(){ return ++solver_satvar;}
+    int create_satvar(){ 
+        auto available_var = solver_ -> declare_one_more_variable();   // Returns the next fresh variable that was not used internally.
+        return available_var;
+    }
     int condition_satvar;
 
 public:
