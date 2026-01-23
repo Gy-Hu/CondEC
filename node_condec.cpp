@@ -118,7 +118,7 @@ bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit, std::vector<
                 auto rhs0_sim_data = aiger_sign(rhs0_lit) ? ~node_cond_data_map[rhs0_node.node].at(cond_sim_round) : node_cond_data_map[rhs0_node.node].at(cond_sim_round);
                 rhs0_sim_data = rhs0_node.neg ? ~rhs0_sim_data : rhs0_sim_data;
                 auto rhs1_sim_data = aiger_sign(rhs1_lit) ? ~node_cond_data_map[rhs1_node.node].at(cond_sim_round) : node_cond_data_map[rhs1_node.node].at(cond_sim_round);
-                rhs1_sim_data = rhs0_node.neg ? ~rhs1_sim_data : rhs1_sim_data;
+                rhs1_sim_data = rhs1_node.neg ? ~rhs1_sim_data : rhs1_sim_data;
                 auto lhs_sim_data = rhs0_sim_data & rhs1_sim_data;
                 node_cond_data_map[lhs_node.node].push_back(lhs_sim_data);
             }
