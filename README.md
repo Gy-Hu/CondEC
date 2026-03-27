@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1>[ISEDA'26] CondEC: Equivalence Checking under Conditions</h1>
+<h1> CondEC: Equivalence Checking under Conditions</h1>
 
 <h5 align="center"> If you find this project useful, please give us a star🌟.
 
@@ -8,10 +8,11 @@
 <h5 align="center"> 
 
 <a href="https://github.com/WBChe/CondEC"><img src="https://img.shields.io/badge/Paper-Link-red"></a>
+<a href='https://huggingface.co/collections/wbche/condec'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Dataset-blue'>
 <a href="https://figshare.com/s/0d69d6d95527ecccfaa4"><img src="https://img.shields.io/badge/Result-Figshare-yellow">
 
 
-[Wenbin Che](https://github.com/WBChe/CondEC),
+[Wenbin Che](),
 [Changyuan Yu](),
 [Hongce Zhang]()<sup>✉️</sup>
 
@@ -31,7 +32,7 @@ Unlike conventional combinational equivalence checking, which assumes full input
 ## Setup
 Dependencies:
 - C++17 compiler (e.g., `g++`)
-- CaDiCaL (fixed commit)
+- CaDiCaL (v3.0.0)
 - AIGER library sources (included: `aiger.c/.h`)
 
 Install CondEC and CaDiCaL from the project root:
@@ -40,7 +41,7 @@ Install CondEC and CaDiCaL from the project root:
 git clone https://github.com/WBChe/CondEC
 cd ./CondEC
 git clone https://github.com/arminbiere/cadical.git
-cd cadical
+cd ./cadical
 git checkout 7b99c07f0bcab5824a5a3ce62c7066554017f641
 ./configure && make
 cd ..
