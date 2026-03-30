@@ -7,8 +7,7 @@ EXEC = condec
 LIBS = -g -lcadical -Lcadical/build
 LIBS = -lcadical -Lcadical/build
 
-CXXFLAGS = -g -std=c++17 -march=native
-# CXXFLAGS = -g -Ofast -Icadical -mavx2 -std=c++17 -march=native
+CXXFLAGS = -O3 -std=c++17 -march=native
 
 $(EXEC): $(OBJS)
 	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS)

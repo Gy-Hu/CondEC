@@ -335,7 +335,6 @@ bool CondEC::cec_checker_neg(const std::vector<unsigned>& cec_candidate, unsigne
 
 void CondEC::cec_inputs_register(){
     for(int i = 0; i < model_ -> num_inputs; i ++){
-        std::cout << "cec_inputs_register (" << (i+1) << "/" << model_->num_inputs << ")" << std::endl;
         // get the lit from aiger model
         auto input_lit = model_ -> inputs[i].lit;
 
@@ -467,8 +466,6 @@ void CondEC::cec_condition_register(unsigned int &condition_output, std::vector<
 
 void CondEC::cec_ands_register(){
     for(int i = 0; i < model_->num_ands; i++){
-        // get the lit from aiger model
-        std::cout << "cec_ands_register (" << (i+1) << "/" << model_->num_ands << ")" << std::endl;
         auto rhs0_lit = model_ -> ands[i].rhs0;
         auto rhs1_lit = model_ -> ands[i].rhs1;
         auto lhs_lit  = model_ -> ands[i].lhs;
@@ -477,11 +474,7 @@ void CondEC::cec_ands_register(){
             break;
 
         // check node is created in condition register?
-        bool condition_created = false;
-        if(lit_node_map.find(aiger_strip(lhs_lit)) != lit_node_map.end()){
-            std::cout << "this node is created in condition register" << std::endl;
-            condition_created = true;
-        }
+        bool condition_created = (lit_node_map.find(aiger_strip(lhs_lit)) != lit_node_map.end());
 
 
         // structral hash
@@ -534,7 +527,6 @@ void CondEC::cec_ands_register(){
 
                     structural_hash_merge_num++;
                     structural_hash_merge = true;
-                    std::cout << "[structural] lit " << lhs_lit << " merge!" << std::endl; 
                     break;  // jump out for
                 }
             }
@@ -551,15 +543,22 @@ void CondEC::cec_ands_register(){
         auto lhs_sim_hash = rhs0_sim_hash & rhs1_sim_hash;
 
 
-        // sim data
+        // sim data — cache node lookups outside the loop, pre-allocate vector
+        int total_sim_rounds = INITIAL_SIM_ROUND + new_sim_data_num;
         std::vector<inputs_t> lhs_sim_data;
-        for(int sim_round = 0; sim_round < (INITIAL_SIM_ROUND + new_sim_data_num); sim_round++){
-            auto rhs0_sim_data = get_simulation_data(rhs0_lit, sim_round);
-            auto rhs1_sim_data = get_simulation_data(rhs1_lit, sim_round);
-            auto sim_data = rhs0_sim_data & rhs1_sim_data;
-            lhs_sim_data.push_back(sim_data);
+        lhs_sim_data.reserve(total_sim_rounds);
 
-            // std::cout << "and node " << lhs_lit << " sim round " << sim_round << " simulation data: " << sim_data << std::endl;
+        auto rhs0_node_info = lit_node_map[aiger_strip(rhs0_lit)];
+        auto rhs1_node_info = lit_node_map[aiger_strip(rhs1_lit)];
+        bool rhs0_neg = aiger_sign(rhs0_lit) ^ rhs0_node_info.neg;
+        bool rhs1_neg = aiger_sign(rhs1_lit) ^ rhs1_node_info.neg;
+        auto &rhs0_sim_vec = node_simulation_data_map[rhs0_node_info.node];
+        auto &rhs1_sim_vec = node_simulation_data_map[rhs1_node_info.node];
+
+        for(int sim_round = 0; sim_round < total_sim_rounds; sim_round++){
+            auto rhs0_sd = rhs0_neg ? ~rhs0_sim_vec[sim_round] : rhs0_sim_vec[sim_round];
+            auto rhs1_sd = rhs1_neg ? ~rhs1_sim_vec[sim_round] : rhs1_sim_vec[sim_round];
+            lhs_sim_data.push_back(rhs0_sd & rhs1_sd);
         }
 
 
@@ -603,18 +602,16 @@ void CondEC::cec_ands_register(){
                 node_neg equivalence_node_pn = {equivalence_node, 0};
                 lit_node_map[lhs_lit] = equivalence_node_pn;
                 cec_merge_num++;
-                std::cout << "[cec] lit " << lhs_lit << " merge!" << std::endl;
-                std::cout << "sat: " << cec_sat_num  << ", unknow: " << cec_unknow_num << ", unsat: " << cec_unsat_num << std::endl;
-                std::cout << "-------------------------------------" << std::endl;
                 continue;
             }
         }
         assert(merge == false);
-        
-        // find CEC possible equivalence node (neg) 
+
+        // find CEC possible equivalence node (neg)
         std::vector<unsigned> cec_candidate_neg;
         auto lhs_sim_hash_neg = ~lhs_sim_hash;
         std::vector<uint64_t> lhs_sim_data_neg;
+        lhs_sim_data_neg.reserve(lhs_sim_data.size());
         for (auto val : lhs_sim_data){
             lhs_sim_data_neg.push_back(~val);
         }
@@ -641,9 +638,6 @@ void CondEC::cec_ands_register(){
                 node_neg equivalence_node_pn = {equivalence_node, 1};
                 lit_node_map[lhs_lit] = equivalence_node_pn; // -------------------------------------------------------------------------bug need to modify  lit -> -node
                 cec_merge_num++;
-                std::cout << "[cec] lit " << lhs_lit << " neg merge!" << std::endl;
-                std::cout << "sat: " << cec_sat_num  << ", unknow: " << cec_unknow_num << ", unsat: " << cec_unsat_num << std::endl;
-                std::cout << "-------------------------------------" << std::endl;
                 continue;
             }
         }
@@ -698,18 +692,13 @@ void CondEC::cec_ands_register(){
 
         // if we have 64 sat solutions, update one round sim data
         if(new_input_pattern_vec.size() != 0){  // maybe new_input_pattern_vec not have at 0
-            if(new_input_pattern_vec.at(0).size() >= 64*(new_sim_data_num + 1)){   
-                std::cout << "new_input_pattern_vec.at(0).size(): " << new_input_pattern_vec.at(0).size() << std::endl; 
-                // creater new input sim data from picosat sat
+            if(new_input_pattern_vec.at(0).size() >= 64*(new_sim_data_num + 1)){
+                // create new input sim data from sat counterexamples
                 create_new_simulation_data();
                 // update sim data for all created node
                 update_all_sim_data(lhs_lit);
             }
         }
-        // end of final handle
-
-        std::cout << "sat: " << cec_sat_num  << ", unknow: " << cec_unknow_num << ", unsat: " << cec_unsat_num << std::endl;
-        std::cout << "-------------------------------------" << std::endl;
     }   // end of for and-gates
 
 }
