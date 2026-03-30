@@ -4,6 +4,7 @@
 #include <map>
 #include <cassert>
 #include <chrono>
+#include <functional>
 
 #include "node_condec.h"
 
@@ -61,16 +62,40 @@ int main(int argc, char ** argv) {
 
     // preprocess miter output and conditions
     unsigned int miter_o = model -> outputs[0].lit;
-    // unsigned int condition = model->constraints[0].lit;
     std::vector<int> condition_vec;
+
+    // recursively flatten positive AND trees to extract leaf conditions
+    // only descend into non-negated AND children; stop at negated or input lits
+    // Use original one-level decomposition for each constraint (handles negated AND
+    // via De Morgan at one level only), then recursively flatten any positive AND children
+    std::function<void(unsigned)> flatten_positive_and = [&](unsigned lit) {
+        if (lit == 0 || lit == 1) return;
+        if (aiger_sign(lit)) {
+            // negated literal: leaf, don't decompose further
+            condition_vec.push_back(lit);
+            return;
+        }
+        aiger_and *gate = aiger_is_and(model, lit);
+        if (!gate) {
+            // input: leaf
+            condition_vec.push_back(lit);
+            return;
+        }
+        // positive AND gate: recurse into both children
+        flatten_positive_and(gate->rhs0);
+        flatten_positive_and(gate->rhs1);
+    };
 
     for(int i = 0; i < model->num_constraints; i++){
         aiger_and *cur_and_gate = aiger_is_and(model, model->constraints[i].lit);
         auto neg = aiger_sign(model->constraints[i].lit);
-        // std::cout << model->constraints[i].lit << std::endl;
-        // std::cout << cur_and_gate->lhs << std::endl;
-        // std::cout << cur_and_gate->rhs0 << std::endl;
-        // std::cout << cur_and_gate->rhs1 << std::endl;
+
+        if (!cur_and_gate) {
+            // constraint is a plain input literal
+            condition_vec.push_back(model->constraints[i].lit);
+            continue;
+        }
+
         int cond0, cond1;
         auto sign0 = aiger_sign(cur_and_gate->rhs0);
         auto sign1 = aiger_sign(cur_and_gate->rhs1);
@@ -83,20 +108,20 @@ int main(int argc, char ** argv) {
             cond1 = sign1? cur_and_gate->rhs1 - 1 : cur_and_gate->rhs1 + 1;
         }
         if(cur_and_gate->rhs0 == 1){
-            condition_vec.push_back(cond1);
+            flatten_positive_and(cond1);
         }
         else if(cur_and_gate->rhs1 == 1){
-            condition_vec.push_back(cond0);
+            flatten_positive_and(cond0);
         }
         else{
-            condition_vec.push_back(cond0);
-            condition_vec.push_back(cond1);
+            flatten_positive_and(cond0);
+            flatten_positive_and(cond1);
         }
     }
 
     unsigned int condition = condition_vec.at(0);
 
-    if(model->num_constraints > 1){
+    if(condition_vec.size() > 1){
         for(int cond_idx = 1; cond_idx < condition_vec.size(); cond_idx++){
             aiger_add_and(model, aiger_var2lit(model->maxvar + 1), condition, condition_vec.at(cond_idx));
             condition = aiger_var2lit(model->maxvar);
@@ -127,6 +152,10 @@ auto clk_start = std::chrono::high_resolution_clock::now();
 
     // init solver
     CaDiCaL::Solver *solver = new CaDiCaL::Solver;
+
+    // tune solver for incremental equivalence checking workload
+    solver->set("walk", 0);          // disable SLS walking (not useful for proving UNSAT)
+    solver->set("condition", 0);     // disable global blocked clause elimination (overhead)
 
     // main stage
     CondEC condeq_check(model, solver);

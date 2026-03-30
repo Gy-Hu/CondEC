@@ -25,6 +25,12 @@ int CondEC::create_structural_hash(unsigned rsh0, unsigned rsh1){
     c1 = id1.neg ? !c1 : c1;
     c2 = id2.neg ? !c2 : c2;
 
+    // normalize operand order so AND(a,b) and AND(b,a) get the same hash
+    if (id1.node > id2.node || (id1.node == id2.node && c1 > c2)) {
+        std::swap(id1, id2);
+        std::swap(c1, c2);
+    }
+
     unsigned hash = 0;
     hash += id1.node * 7937;
     hash += id2.node * 2971;
@@ -144,24 +150,27 @@ bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit, std::vector<
         std::cout << "we already generate useful initial pattern size: " << initial_pattern_vec.at(0).size() << std::endl;
         initial_sim_round = initial_sim_round + INITIAL_ROUND;
 
-        if(initial_pattern_vec.at(0).size() <= 64){
+        // only give up if we've tried multiple rounds and still can't get enough valid patterns
+        if(initial_sim_round >= INITIAL_ROUND * 5 && initial_pattern_vec.at(0).size() <= 64){
             return true;
         }
     }
     
     // transfer initial_pattern_vec to node_simulation_data_map
-    uint64_t sim_hash;
-    uint64_t sim_data;
+    uint64_t sim_hash = 0;
+    uint64_t sim_data = 0;
     for(int i = 0; i < model_ -> num_inputs; i ++){
         int initial_sim_num = 0;
         auto input_node = lit_node_map[model_->inputs[i].lit];
 
+        sim_hash = 0;
         for(int pattern_round = 0; pattern_round < 64; pattern_round++){
             sim_hash <<= 1;
             sim_hash |= (initial_pattern_vec.at(i).at(pattern_round) ? 1 : 0);
         }
         node_simulation_hash_map[input_node.node] = sim_hash;
 
+        sim_data = 0;
         for(int pattern_round = 64; pattern_round < (INITIAL_SIM_ROUND+1) * 64; pattern_round++){
             sim_data <<= 1;
             sim_data |= (initial_pattern_vec.at(i).at(pattern_round) ? 1 : 0);
@@ -335,13 +344,13 @@ void CondEC::cec_inputs_register(){
         node_neg input_node_pn = {input_node, 0};
         lit_node_map[input_lit] = input_node_pn;
         node_lit_map[input_node] = input_lit;
-        
+
         // node -> sat var
         auto satvar = create_satvar();
         node_satvar_map[input_node] = satvar;
 
-        // structral hash -> node
-        // structural_hash_nodevec_map[input_node].push_back(input_node);
+        // freeze input variables to prevent elimination by solver
+        solver_->freeze(satvar);
     }
 }
 
@@ -412,8 +421,23 @@ void CondEC::cec_condition_register(unsigned int &condition_output, std::vector<
     auto condition_satvar = get_satvar(condition_lit);
     unit(condition_satvar);
 
+    // set phase hints: tell solver the preferred direction for constrained inputs
+    for(int i = 0; i < condition_vec.size(); i++){
+        unsigned cond_lit = aiger_strip(condition_vec[i]);
+        // only set phase for primary inputs
+        if(aiger_lit2var(cond_lit) <= model_->num_inputs){
+            auto input_node = lit_node_map[cond_lit];
+            auto satvar = node_satvar_map[input_node.node];
+            if(satvar != 0){
+                // phase(positive_lit) = prefer true; phase(negative_lit) = prefer false
+                int phase_lit = aiger_sign(condition_vec[i]) ? -satvar : satvar;
+                solver_->phase(phase_lit);
+            }
+        }
+    }
+
     std::cout << "total create condition node number: " << condition_node_number << std::endl;
-    
+
     auto enable = generate_initial_sim_hash_data(condition_lit, condition_vec);
 
     if(enable){
@@ -469,6 +493,11 @@ void CondEC::cec_ands_register(){
         bool c2 = aiger_sign(rhs1_lit);
         c1 = id1.neg ? !c1 : c1;
         c2 = id2.neg ? !c2 : c2;
+        // normalize operand order for structural comparison
+        if (id1.node > id2.node || (id1.node == id2.node && c1 > c2)) {
+            std::swap(id1, id2);
+            std::swap(c1, c2);
+        }
 
         bool structural_hash_merge = false;
         if(structural_hash_nodevec_map.find(structral_hash) != structural_hash_nodevec_map.end()){  // check if same structural hash
@@ -485,6 +514,11 @@ void CondEC::cec_ands_register(){
                 bool other_c2 = aiger_sign(other_and_gate->rhs1);
                 other_c1 = other_id1.neg ? !other_c1 : other_c1;
                 other_c2 = other_id2.neg ? !other_c2 : other_c2;
+                // normalize operand order for structural comparison
+                if (other_id1.node > other_id2.node || (other_id1.node == other_id2.node && other_c1 > other_c2)) {
+                    std::swap(other_id1, other_id2);
+                    std::swap(other_c1, other_c2);
+                }
 
                 // check if same input (id1, id2, c1, c2)
                 if((id1.node == other_id1.node) && (id2.node == other_id2.node) && (c1 == other_c1) && (c2 == other_c2)){
