@@ -111,7 +111,7 @@ bool CondEC::generate_initial_sim_hash_data(unsigned condition_lit, std::vector<
             auto rhs1_lit = model_ -> ands[i].rhs1;
             auto lhs_lit  = model_ -> ands[i].lhs;
 
-            if(lit_node_map.find(lhs_lit) == lit_node_map.end()){
+            if(!lit_has_node(lhs_lit)){
                 // this lit is not in condition
                 continue;
             }
@@ -372,7 +372,7 @@ void CondEC::cec_condition_register(unsigned int &condition_output, std::vector<
         }
 
         // when lit already create node, jump to next turn
-        if(lit_node_map.find(aiger_strip(cur_lit)) != lit_node_map.end()){
+        if(lit_has_node(cur_lit)){
                 // std::cout << "find same and-gates node" << std::endl;
                 ands_stack.pop();
                 continue;
@@ -474,7 +474,7 @@ void CondEC::cec_ands_register(){
             break;
 
         // check node is created in condition register?
-        bool condition_created = (lit_node_map.find(aiger_strip(lhs_lit)) != lit_node_map.end());
+        bool condition_created = lit_has_node(lhs_lit);
 
 
         // structral hash
@@ -714,12 +714,71 @@ int CondEC::cec_solve(){
     std::cout << "new sim pattern  number: " << new_sim_data_num << std::endl;
     std::cout << "-------------------------------------" << std::endl;
 
-    // final sat result for output
+    // Try old solver first with a conflict limit
     auto miter_out  = model_ -> outputs[0].lit;
     auto satvar = get_satvar(miter_out);
     unit(satvar);
-    int res = solver_ -> solve();    //return 10 = sat, 20 = unsat, 0 = unknow
-    
+
+    solver_->limit("conflicts", 100000);
+    int res = solver_->solve();
+
+    if (res == 0) {
+        // Old solver inconclusive — rebuild a clean solver without dead clauses
+        std::cout << "rebuilding fresh solver..." << std::endl;
+
+        CaDiCaL::Solver *fresh = new CaDiCaL::Solver;
+        fresh->set("walk", 0);
+        fresh->set("condition", 0);
+
+        std::unordered_map<unsigned, int> fresh_node_satvar;
+        int fresh_var = 0;
+
+        // constant-true variable
+        ++fresh_var;
+        fresh->resize(fresh_var);
+        int const_true_var = fresh_var;
+        fresh->clause(const_true_var);
+
+        auto get_fresh_satvar = [&](unsigned lit) -> int {
+            if (aiger_strip(lit) == 0) {
+                return aiger_sign(lit) ? const_true_var : -const_true_var;
+            }
+            if (!lit_has_node(lit)) {
+                ++fresh_var;
+                fresh->resize(fresh_var);
+                return aiger_sign(lit) ? -fresh_var : fresh_var;
+            }
+            auto node_info = lit_node_map[aiger_strip(lit)];
+            bool neg = aiger_sign(lit) ^ node_info.neg;
+            auto it = fresh_node_satvar.find(node_info.node);
+            if (it == fresh_node_satvar.end()) {
+                ++fresh_var;
+                fresh->resize(fresh_var);
+                it = fresh_node_satvar.emplace(node_info.node, fresh_var).first;
+            }
+            return neg ? -it->second : it->second;
+        };
+
+        for (int i = 0; i < model_->num_ands; i++) {
+            int lhs_sv = get_fresh_satvar(model_->ands[i].lhs);
+            int rhs0_sv = get_fresh_satvar(model_->ands[i].rhs0);
+            int rhs1_sv = get_fresh_satvar(model_->ands[i].rhs1);
+            fresh->clause(-lhs_sv, rhs0_sv);
+            fresh->clause(-lhs_sv, rhs1_sv);
+            fresh->clause(lhs_sv, -rhs0_sv, -rhs1_sv);
+        }
+
+        for (int i = 0; i < model_->num_constraints; i++) {
+            fresh->clause(get_fresh_satvar(model_->constraints[i].lit));
+        }
+
+        fresh->clause(get_fresh_satvar(miter_out));
+        std::cout << "fresh solver: " << fresh_var << " vars" << std::endl;
+
+        res = fresh->solve();
+        delete fresh;
+    }
+
     if(res == 10)
         std::cout << "final sat result: SAT" << std::endl;
     else if(res == 20)
@@ -728,7 +787,5 @@ int CondEC::cec_solve(){
         std::cout << "final sat result: UNKNOW" << std::endl;
 
     return res;
-    std::cout << "-------------------------------------" << std::endl;
-
 }
 

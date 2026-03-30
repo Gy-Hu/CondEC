@@ -72,23 +72,33 @@ public:
         unsigned neg;
     };
 
-    // lit <-> node
-    std::unordered_map<unsigned, node_neg>                lit_node_map;   // many lit can map to one node
-    std::unordered_map<unsigned, unsigned>                node_lit_map;   // node only map to one origin lit
+    static constexpr unsigned INVALID_NODE = 0;  // node 0 is unused (nodes start from 1)
 
-    // node -> satvar
-    std::unordered_map<unsigned, int>                     node_satvar_map;
+    // lit <-> node  (indexed by aiger_strip(lit), pre-allocated to maxvar*2+2)
+    std::vector<node_neg>                lit_node_map;
+    // node -> origin lit (indexed by node id)
+    std::vector<unsigned>                node_lit_map;
 
-    // node <-> structural hash
+    // node -> satvar (indexed by node id)
+    std::vector<int>                     node_satvar_map;
+
+    // node <-> structural hash (hash keys are non-sequential, keep as unordered_map)
     std::unordered_map<int, std::vector<unsigned>>        structural_hash_nodevec_map;
 
-    // node <-> sim hash
-    std::unordered_map<unsigned, sim_hash_t>                node_simulation_hash_map;
+    // node -> sim hash (indexed by node id)
+    std::vector<sim_hash_t>              node_simulation_hash_map;
+    // sim_hash -> node vec (hash keys are non-sequential, keep as unordered_map)
     std::unordered_map<sim_hash_t, std::vector<unsigned>>   simulation_hash_nodevec_map;
 
-    // node -> sim data vec
-    std::unordered_map<unsigned, std::vector<inputs_t>>   node_simulation_data_map;   // node -> simulation data vec
-    std::unordered_map<unsigned, std::vector<inputs_t>>   node_cond_data_map;
+    // node -> sim data vec (indexed by node id)
+    std::vector<std::vector<inputs_t>>   node_simulation_data_map;
+    std::vector<std::vector<inputs_t>>   node_cond_data_map;
+
+    // check if lit has been mapped to a node
+    bool lit_has_node(unsigned lit) const {
+        unsigned idx = aiger_strip(lit);
+        return idx < lit_node_map.size() && lit_node_map[idx].node != INVALID_NODE;
+    }
 
 
     // generate 64 bit random data for initial sim hash and sim data
@@ -138,8 +148,23 @@ public:
     // cec final solve stage
     int cec_solve();
 
-    CondEC(aiger *model, CaDiCaL::Solver *solver): model_(model), solver_(solver), node_number(0), structural_hash_merge_num(0), cec_merge_num(0), cec_sat_num(0), cec_unknow_num(0), cec_unsat_num(0),
-                initial_pattern_vec(0), new_input_pattern_vec(0), new_sim_data_num(0), solver_satvar(0){};
+    CondEC(aiger *model, CaDiCaL::Solver *solver)
+        : model_(model), solver_(solver), node_number(0),
+          structural_hash_merge_num(0), cec_merge_num(0),
+          cec_sat_num(0), cec_unknow_num(0), cec_unsat_num(0),
+          initial_pattern_vec(0), new_input_pattern_vec(0),
+          new_sim_data_num(0), solver_satvar(0)
+    {
+        // Pre-allocate vectors indexed by lit/node for O(1) access
+        unsigned max_lit = model->maxvar * 2 + 2;
+        unsigned max_nodes = model->maxvar + model->num_inputs + 2;
+        lit_node_map.resize(max_lit, {INVALID_NODE, 0});
+        node_lit_map.resize(max_nodes, 0);
+        node_satvar_map.resize(max_nodes, 0);
+        node_simulation_hash_map.resize(max_nodes, 0);
+        node_simulation_data_map.resize(max_nodes);
+        node_cond_data_map.resize(max_nodes);
+    }
 
 
     /********************************* Cadical Solver *******************************/
