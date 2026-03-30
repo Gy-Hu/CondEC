@@ -234,103 +234,150 @@ void CondEC::update_all_sim_data(unsigned int lhs_lit_end){
 // check equivalence node
 bool CondEC::cec_checker(const std::vector<unsigned>& cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar){
     for(auto &other_node : cec_candidate){
-        // assume
         auto assumption = create_satvar();
-        
-        create_andgate(lhs_satvar, rhs0_satvar, rhs1_satvar, assumption); // clause OR assumption
+
+        create_andgate(lhs_satvar, rhs0_satvar, rhs1_satvar, assumption);
         auto miter_i1 = node_satvar_map[other_node];
         auto miter_i2 = lhs_satvar;
         auto miter_o = create_satvar();
-        create_miter(miter_o, miter_i1, miter_i2, assumption);  // clause OR assumption
+        create_miter(miter_o, miter_i1, miter_i2, assumption);
 
-        // unit(miter_o, assumption);  // clause OR assumption
         solver_->assume(miter_o);
-        solver_->assume(-assumption);    // make assumption = flase,
+        solver_->assume(-assumption);
 
-        solver_ ->limit("conflicts", 10000);
+        // adaptive conflict limit via contextual bandit
+        int conflict_limit = conflict_bandit.select_arm(
+            bandit_gate_pos, (int)cec_candidate.size(), bandit_merge_rate);
+        solver_->limit("conflicts", conflict_limit);
+
+        auto t_start = std::chrono::high_resolution_clock::now();
         int res = solver_ -> solve();
+        auto t_end = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double>(t_end - t_start).count();
 
+        // compute reward and update bandit
+        conflict_bandit.warmup_update(res == 20);  // track UNSAT rate for bandit activation
+        double reward;
         if(res == 10){
-            // add more sim round and sim data
+            reward = 0.1 / (elapsed + 0.001);   // SAT: found counterexample, moderate reward
             cec_sat_num++;
             if (new_input_pattern_vec.empty())
-                new_input_pattern_vec.resize(model_->num_inputs);   // set input number vector
+                new_input_pattern_vec.resize(model_->num_inputs);
             for(int i = 0; i < model_ -> num_inputs; i ++){
                 auto input_lit = model_ -> inputs[i].lit;
                 auto input_node = lit_node_map[input_lit];
                 auto input_satvar = node_satvar_map[input_node.node];
-
                 int sat_assignment = solver_ -> val(input_satvar);
                 bool sim_bit = (sat_assignment > 0) ? 1 : 0;
                 new_input_pattern_vec.at(i).push_back(sim_bit);
             }
         }
         else if(res == 20){
-            // merge equivalence node
+            reward = 1.0 / (elapsed + 0.001);    // UNSAT: successful merge, best reward
             cec_unsat_num++;
             equivalence_node = other_node;
-            unit(assumption);   // make assumption = true, disable clause of this function
-            return true;    // merge
+            conflict_bandit.update(conflict_limit, bandit_gate_pos,
+                (int)cec_candidate.size(), bandit_merge_rate, reward);
+            bandit_recent_merge++;
+            bandit_recent_total++;
+            if (bandit_recent_total >= 32) {
+                bandit_merge_rate = (double)bandit_recent_merge / bandit_recent_total;
+                bandit_recent_merge = 0; bandit_recent_total = 0;
+            }
+            unit(assumption);
+            return true;
         }
         else{
-            // nothing to do
+            reward = -5.0;                        // UNKNOWN: worst, wasted full budget
             cec_unknow_num++;
         }
 
-        unit(assumption);   // make assumption = true, disable clause of this function
+        bool was_unknown = (res == 0);
+        conflict_bandit.update(conflict_limit, bandit_gate_pos,
+            (int)cec_candidate.size(), bandit_merge_rate, reward, was_unknown);
+        // update merge rate
+        bandit_recent_total++;
+        if (bandit_recent_total >= 32) {
+            bandit_merge_rate = (double)bandit_recent_merge / bandit_recent_total;
+            bandit_recent_merge = 0; bandit_recent_total = 0;
+        }
+
+        unit(assumption);
     }
 
-    return false;   // no merge
+    return false;
 }
 
 bool CondEC::cec_checker_neg(const std::vector<unsigned>& cec_candidate, unsigned &equivalence_node, int rhs0_satvar, int rhs1_satvar, int lhs_satvar){
     for(auto &other_node : cec_candidate){
-        // assume
         auto assumption = create_satvar();
-        
-        create_andgate(lhs_satvar, rhs0_satvar, rhs1_satvar, assumption); // clause OR assumption
+
+        create_andgate(lhs_satvar, rhs0_satvar, rhs1_satvar, assumption);
         auto miter_i1 = node_satvar_map[other_node];
         auto miter_i2 = lhs_satvar;
         auto miter_o = create_satvar();
-        create_miter(miter_o, -miter_i1, miter_i2, assumption);  // clause OR assumption
-        
+        create_miter(miter_o, -miter_i1, miter_i2, assumption);
+
         solver_->assume(miter_o);
-        solver_->assume(-assumption);    // make assumption = flase,
+        solver_->assume(-assumption);
 
-        solver_ ->limit("conflicts", 10000);
+        int conflict_limit = conflict_bandit.select_arm(
+            bandit_gate_pos, (int)cec_candidate.size(), bandit_merge_rate);
+        solver_->limit("conflicts", conflict_limit);
+
+        auto t_start = std::chrono::high_resolution_clock::now();
         int res = solver_ -> solve();
+        auto t_end = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double>(t_end - t_start).count();
 
+        conflict_bandit.warmup_update(res == 20);
+        double reward;
         if(res == 10){
-            // add more sim round and sim data
+            reward = 0.1 / (elapsed + 0.001);
             cec_sat_num++;
             if (new_input_pattern_vec.empty())
-                new_input_pattern_vec.resize(model_->num_inputs);   // set input number vector
+                new_input_pattern_vec.resize(model_->num_inputs);
             for(int i = 0; i < model_ -> num_inputs; i ++){
                 auto input_lit = model_ -> inputs[i].lit;
                 auto input_node = lit_node_map[input_lit];
                 auto input_satvar = node_satvar_map[input_node.node];
-
                 int sat_assignment = solver_ -> val(input_satvar);
                 bool sim_bit = (sat_assignment > 0) ? 1 : 0;
                 new_input_pattern_vec.at(i).push_back(sim_bit);
             }
         }
         else if(res == 20){
-            // merge equivalence node
+            reward = 1.0 / (elapsed + 0.001);
             cec_unsat_num++;
             equivalence_node = other_node;
-            unit(assumption);   // make assumption = true, disable clause of this function
-            return true;    // merge
+            conflict_bandit.update(conflict_limit, bandit_gate_pos,
+                (int)cec_candidate.size(), bandit_merge_rate, reward);
+            bandit_recent_merge++;
+            bandit_recent_total++;
+            if (bandit_recent_total >= 32) {
+                bandit_merge_rate = (double)bandit_recent_merge / bandit_recent_total;
+                bandit_recent_merge = 0; bandit_recent_total = 0;
+            }
+            unit(assumption);
+            return true;
         }
         else{
-            // nothing to do
+            reward = -1.0;
             cec_unknow_num++;
         }
 
-        unit(assumption);   // make assumption = true, disable clause of this function
+        conflict_bandit.update(conflict_limit, bandit_gate_pos,
+            (int)cec_candidate.size(), bandit_merge_rate, reward);
+        bandit_recent_total++;
+        if (bandit_recent_total >= 32) {
+            bandit_merge_rate = (double)bandit_recent_merge / bandit_recent_total;
+            bandit_recent_merge = 0; bandit_recent_total = 0;
+        }
+
+        unit(assumption);
     }
 
-    return false;   // no merge
+    return false;
 }
 
 void CondEC::cec_inputs_register(){
@@ -466,6 +513,7 @@ void CondEC::cec_condition_register(unsigned int &condition_output, std::vector<
 
 void CondEC::cec_ands_register(){
     for(int i = 0; i < model_->num_ands; i++){
+        bandit_gate_pos = (double)i / model_->num_ands;  // update context for bandit
         auto rhs0_lit = model_ -> ands[i].rhs0;
         auto rhs1_lit = model_ -> ands[i].rhs1;
         auto lhs_lit  = model_ -> ands[i].lhs;
