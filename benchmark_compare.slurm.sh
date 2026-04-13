@@ -20,6 +20,13 @@ PY
 
 SCRIPT_PATH="$(resolve_path "$0")"
 PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+# Load local secrets (.env is gitignored; copy from .env.example to configure)
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    # shellcheck disable=SC1091
+    source "$PROJECT_ROOT/.env"
+fi
+
 DEFAULT_PARTITION="q-lxe5wipa"
 DEFAULT_MAX_PARALLEL="59"
 DEFAULT_WORKER_CPUS="1"
@@ -71,6 +78,24 @@ load_slurm_module() {
     if type module >/dev/null 2>&1; then
         module load slurm/slurm/23.02.7 >/dev/null 2>&1 || true
     fi
+}
+
+# Send a Server酱 WeChat notification. Silently skips if SERVERCHAN_TOKEN is unset.
+send_serverchan() {
+    local title="$1"
+    local content="$2"
+
+    if [ -z "${SERVERCHAN_TOKEN:-}" ]; then
+        return 0
+    fi
+
+    local encoded_title encoded_content
+    encoded_title="$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$title" 2>/dev/null || printf '%s' "$title")"
+    encoded_content="$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$content" 2>/dev/null || printf '%s' "$content")"
+
+    curl -s -X POST "https://sctapi.ftqq.com/${SERVERCHAN_TOKEN}.send" \
+        -d "title=${encoded_title}&desp=${encoded_content}" \
+        > /dev/null 2>&1 || true
 }
 
 require_cmd() {
@@ -342,6 +367,15 @@ Final CSV will be written to:
   $RUN_DIR/CondEC_result_compare.csv
   $PROJECT_ROOT/result/CondEC_result_compare.csv
 EOF
+
+    send_serverchan \
+        "CondEC Benchmark Submitted" \
+        "**Run**: ${RUN_NAME}
+**Benchmarks**: ${benchmark_count}
+**Array job**: ${array_job}  |  **Collect job**: ${collect_job}
+**Per-tool timeout**: ${TIMEOUT_SEC}s
+**Max walltime**: ${WORKER_TIME}
+You will receive another notification when results are ready."
 }
 
 read_manifest_line() {
@@ -597,6 +631,51 @@ Benchmark collection finished.
   Merged CSV : $merged_csv
   Published  : $published_csv
 EOF
+
+    local notify_body
+    notify_body="$(python3 - "$merged_csv" <<'PY'
+from pathlib import Path
+import sys
+
+csv_path = Path(sys.argv[1])
+lines = [l for l in csv_path.read_text().splitlines() if l.strip()]
+rows = lines[1:]  # skip header
+
+total = len(rows)
+improved_faster = 0
+speedup_ratios = []
+
+for row in rows:
+    parts = row.split(',')
+    if len(parts) < 6:
+        continue
+    try:
+        baseline = float(parts[4])
+        improved = float(parts[5])
+        if baseline > 0 and improved > 0:
+            ratio = baseline / improved
+            speedup_ratios.append(ratio)
+            if improved < baseline:
+                improved_faster += 1
+    except ValueError:
+        pass
+
+if speedup_ratios:
+    avg_speedup = sum(speedup_ratios) / len(speedup_ratios)
+    max_speedup = max(speedup_ratios)
+    print(f"**Benchmarks**: {total}")
+    print(f"**Improved faster**: {improved_faster}/{len(speedup_ratios)}")
+    print(f"**Avg speedup**: {avg_speedup:.2f}x")
+    print(f"**Max speedup**: {max_speedup:.2f}x")
+else:
+    print(f"**Benchmarks**: {total} (no numeric condec results to compare)")
+PY
+)"
+
+    send_serverchan \
+        "CondEC Benchmark Complete" \
+        "${notify_body}
+**CSV**: ${published_csv}"
 }
 
 MODE="${1:-submit}"

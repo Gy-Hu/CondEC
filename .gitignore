@@ -34,3 +34,9 @@ log/
 *.app
 condec
 
+# Local benchmark artifacts
+benchmark_artifacts/
+
+# Local secrets (Server酱 token etc.)
+.env
+
