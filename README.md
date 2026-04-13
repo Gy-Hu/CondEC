@@ -32,20 +32,20 @@ Unlike conventional combinational equivalence checking, which assumes full input
 ## Setup
 Dependencies:
 - C++17 compiler (e.g., `g++`)
-- CaDiCaL (v3.0.0)
+- `git`, `make`, `python3`, `timeout`, `/usr/bin/time`
+- Slurm `sbatch` command for the comparison pipeline
 - AIGER library sources (included: `aiger.c/.h`)
 
-Install CondEC and CaDiCaL from the project root:
+One-time local benchmark setup uses these fixed paths:
+- `tools/abc/abc`
+- `tools/kissat/build/kissat`
+- `cadical/build/cadical`
+- `benchmark_artifacts/condec_baseline`
+- `benchmark_artifacts/condec_improved`
 
-```bash
-git clone https://github.com/WBChe/CondEC
-cd ./CondEC
-git clone https://github.com/arminbiere/cadical.git
-cd ./cadical
-git checkout 7b99c07f0bcab5824a5a3ce62c7066554017f641
-./configure && make
-cd ..
-```
+If any of them are missing, build or place them there once. The benchmark
+script also accepts manual overrides through `ABC_BIN`, `KISSAT_BIN`,
+`CADICAL_SOLVER_BIN`, `BASELINE_CONDEC_BIN`, and `IMPROVED_CONDEC_BIN`.
 
 ## Quickstart
 Build:
@@ -71,28 +71,46 @@ Example:
 ```
 
 ## Experiment
-CondEC has been evaluated on a diverse set of industrial-style and competition benchmarks, including constrained datapath and arithmetic-intensive designs.
-Batch evaluation uses `test.sh` and processes all `benchmarks/aig/*.aig` files. It writes a CSV summary to `results.csv`.
+For a full baseline-vs-current Slurm comparison benchmark, make sure the paths
+above already exist and then submit:
+
+```bash
+bash benchmark_compare.slurm.sh
+```
+
+By default the benchmark submission script prefers project-local tools and prepared artifacts at:
+- `tools/abc/abc`
+- `tools/kissat/build/kissat`
+- `cadical/build/cadical`
+- `benchmark_artifacts/condec_baseline`
+- `benchmark_artifacts/condec_improved`
+
+You can still override them explicitly with environment variables such as `ABC_BIN`, `KISSAT_BIN`, `CADICAL_SOLVER_BIN`, `BASELINE_CONDEC_BIN`, and `IMPROVED_CONDEC_BIN`.
+
+The Slurm submission also uses explicit runtime parameters instead of leaving
+array concurrency up to the scheduler defaults. Current defaults are:
+- `PARTITION=q-lxe5wipa`
+- `MAX_PARALLEL=59` (matches benchmark count; cluster has 576 idle CPUs across hk01dgx042/043/055, so all 59 fit easily)
+- `WORKER_CPUS=1`
+- `WORKER_MEM=8G`
+- `TIMEOUT_SEC=3600`
+- `WORKER_TIME=05:30:00` by default from `TIMEOUT_SEC * 5 + 1800`
+- `COLLECT_CPUS=1`
+- `COLLECT_MEM=4G`
+- `COLLECT_TIME=00:10:00`
+
+For CondEC-only batch evaluation on `benchmarks/aig/*.aig`:
 
 ```bash
 ./test.sh
 ```
 
-
-For SAT solver (ensure the solver is properly installed and the paths in the .sh scripts are correctly configured):
-
-```bash
-./test_kissat.sh # for kissat test
-
-./test_cadical.sh # for cadical test
-```
-
-For ABC (ensure ABC is installed):
+For standalone solver checks with project-local paths:
 
 ```bash
-abc -c "&r benchmarks/aig-and-output/*.aig; &cec -m;" # for one test
-
-./test_abc-cec.sh # for all test
+./test_kissat.sh
+./test_cadical.sh
+./test_abc-cec.sh
 ```
 
 
